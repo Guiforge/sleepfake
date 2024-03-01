@@ -5,7 +5,12 @@ description = "Fake the time.sleep/asyncio.sleep function during tests."
 authors = [
     { name = "Guillaume Pouyat", email = "guillaume.pouyat@protonmail.com" },
 ]
-dependencies = ["freezegun>=1.4.0", "pytest>=8.0.2", "pytz>=2024.1"]
+dependencies = [
+    "freezegun>=1.4.0",
+    "pytest>=8.0.2",
+    "pytz>=2024.1",
+    "pre-commit>=3.6.2",
+]
 readme = "README.md"
 requires-python = ">= 3.8"
 
@@ -28,8 +33,11 @@ allow-direct-references = true
 packages = ["src/sleepfake"]
 
 [tool.rye.scripts]
-mypy = "mypy --install-types ."
+mypy = "mypy --install-types src tests"
 test = "pytest tests"
+pre-commit = "pre-commit run --all-files"
+pre-commit-install = "pre-commit install"
+pre-commit-update = "pre-commit autoupdate"
 
 [tool.mypy]
 platform = 'linux'
@@ -101,7 +109,6 @@ lint.select = [
     "NPY",
     "RUF",
 ]
-
 lint.ignore = [
     "ANN102",
     "N812",
@@ -130,14 +137,10 @@ lint.ignore = [
     "COM812",
     "ISC001",
 ]
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+lint.unfixable = ["RET501"]
 
 line-length = 100
-
-# Allow unused variables when underscore-prefixed.
-lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
-
-#RET501 UnnecessaryReturnNone
-lint.unfixable = ["RET501"]
 
 [tool.ruff.lint.flake8-annotations]
 suppress-none-returning = true

@@ -1,0 +1,36 @@
+default_stages: [push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+      - id: check-case-conflict # Check for files that would conflict in case-insensitive filesystem
+      - id: check-merge-conflict # Check for files that contain merge conflict strings.
+      - id: debug-statements # Check for debugger imports and py37+ `breakpoint()` calls in python source.
+      - id: requirements-txt-fixer # Sorts entries in requirements.txt
+      - id: detect-private-key
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: make lint/ruff
+        language: system
+        types: [python]
+        pass_filenames: false
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: make lint/mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.0
+    hooks:
+      - id: ruff-format
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
