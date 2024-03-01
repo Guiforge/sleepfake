@@ -8,27 +8,47 @@
 #   with-sources: false
 
 -e file:.
+cfgv==3.4.0
+    # via pre-commit
+distlib==0.3.8
+    # via virtualenv
+filelock==3.13.1
+    # via virtualenv
 freezegun==1.4.0
     # via sleepfake
+identify==2.5.35
+    # via pre-commit
 iniconfig==2.0.0
     # via pytest
 mypy==1.8.0
 mypy-extensions==1.0.0
     # via mypy
+nodeenv==1.8.0
+    # via pre-commit
 packaging==23.2
     # via pytest
+platformdirs==4.2.0
+    # via virtualenv
 pluggy==1.4.0
     # via pytest
+pre-commit==3.6.2
+    # via sleepfake
 pytest==8.0.2
     # via pytest-asyncio
     # via sleepfake
 pytest-asyncio==0.23.5
-python-dateutil==2.8.2
+python-dateutil==2.9.0
     # via freezegun
 pytz==2024.1
     # via sleepfake
+pyyaml==6.0.1
+    # via pre-commit
+setuptools==69.1.1
+    # via nodeenv
 six==1.16.0
     # via python-dateutil
 types-pytz==2024.1.0.20240203
 typing-extensions==4.10.0
     # via mypy
+virtualenv==20.25.1
+    # via pre-commit
