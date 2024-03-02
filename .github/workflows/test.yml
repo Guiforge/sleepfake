@@ -35,7 +35,6 @@ jobs:
         $HOME/.rye/shims/rye sync
     - name: Lint
       run: |
-        # $HOME/.rye/shims/rye lint
         $HOME/.rye/shims/rye run lint
     - name: Test with pytest
       run: |
