@@ -39,11 +39,6 @@ jobs:
           source "$HOME/.rye/env"
           rye build
 
-      - name: Publish
-        run: |
-          source "$HOME/.rye/env"
-          rye publish
-
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
