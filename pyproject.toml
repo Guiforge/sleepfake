@@ -33,8 +33,9 @@ allow-direct-references = true
 packages = ["src/sleepfake"]
 
 [tool.rye.scripts]
-mypy = "mypy --install-types src tests"
-test = "pytest tests"
+lint = { chain = ["lint:ruff", "lint:mypy"] }
+"lint:mypy" = "mypy --install-types src tests"
+"lint:ruff" = "ruff ."
 pre-commit = "pre-commit run --all-files"
 pre-commit-install = "pre-commit install"
 pre-commit-update = "pre-commit autoupdate"
