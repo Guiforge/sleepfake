@@ -1,9 +1,18 @@
-# SleepFake
+# ⏰ SleepFake
 
-`SleepFake` is a Python class that provides a context manager to fake the `time.sleep` and `asyncio.sleep` functions during tests. This is useful for testing time-dependent code without having to actually wait for time to pass.
-Simple package, the most import magic comes from [freezegun](https://github.com/spulec/freezegun).
+[![pypi](https://img.shields.io/pypi/v/sleepfake.svg)](https://pypi.python.org/pypi/sleepfake)
+[![Version](https://img.shields.io/pypi/v/sleepfake)](<https://pypi.python.org/pypi/sleepfake>)
+[![License](https://img.shields.io/pypi/l/sleepfake)](<https://pypi.python.org/pypi/sleepfake>)
 
-## Usage
+`SleepFake` is a compact Python package (under 100 lines) that provides a context manager to simulate the `time.sleep` and `asyncio.sleep` functions during tests. This is useful for testing time-dependent code without the need to actually wait for time to pass. The real magic behind this package comes from [freezegun](https://github.com/spulec/freezegun). 🎩✨
+
+## Installation
+
+```bash
+pip install sleepfake
+```
+
+## 🚀 Usage
 
 ```python
 import asyncio
@@ -34,3 +43,35 @@ async def test_async_example():
     real_end = asyncio.get_event_loop().time()
     assert real_end - real_start < 1  # almost 0 seconds
 ```
+
+## Local Development
+
+### Prerequisites
+
+Install [rye](https://rye-up.com/)
+
+```bash
+curl -sSf https://rye-up.com/get | bash
+```
+
+### Install dep
+
+```bash
+rye sync
+```
+
+### Run tests
+
+```bash
+rye run test
+```
+
+### Run linter
+
+```bash
+rye run lint
+```
+
+## Acknowledgments 🙏
+
+- [freezegun](https://github.com/spulec/freezegun)
