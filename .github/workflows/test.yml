@@ -32,11 +32,11 @@ jobs:
         echo 'source "$HOME/.rye/env"' >> ~/.bashrc
     - name: Install dependencies
       run: |
-        rye sync
+        $HOME/.rye/shims/rye sync
     - name: Lint
       run: |
-        rye lint
-        rye run mypy
+        $HOME/.rye/shims/rye lint
+        $HOME/.rye/shims/rye run mypy
     - name: Test with pytest
       run: |
-        rye run test
+        $HOME/.rye/shims/rye run test
