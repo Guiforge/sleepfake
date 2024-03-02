@@ -11,10 +11,8 @@ on:
 
 permissions:
   contents: read
-
 jobs:
   build:
-
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,12 +28,13 @@ jobs:
       run: |
         curl -sSf https://rye-up.com/get | RYE_INSTALL_OPTION="--yes" bash
         echo 'source "$HOME/.rye/env"' >> ~/.bashrc
+        source ~/.bashrc
     - name: Install dependencies
       run: |
-        $HOME/.rye/shims/rye sync
+        rye sync
     - name: Lint
       run: |
-        $HOME/.rye/shims/rye run lint
+        rye run lint
     - name: Test with pytest
       run: |
-        $HOME/.rye/shims/rye run test
+        rye run test
