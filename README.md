@@ -1,8 +1,8 @@
 # ⏰ SleepFake
 
-[![pypi](https://img.shields.io/pypi/v/sleepfake.svg)](https://pypi.python.org/pypi/sleepfake)
-[![Version](https://img.shields.io/pypi/v/sleepfake)](<https://pypi.python.org/pypi/sleepfake>)
-[![License](https://img.shields.io/pypi/l/sleepfake)](<https://pypi.python.org/pypi/sleepfake>)
+[![Version](https://img.shields.io/pypi/v/sleepfake?style=for-the-badge)](<https://pypi.python.org/pypi/sleepfake>)
+[![versions](https://img.shields.io/pypi/pyversions/sleepfake.svg?style=for-the-badge)](https://github.com/Guiforge/sleepfake)
+[![license](https://img.shields.io/github/license/Guiforge/sleepfake.svg?style=for-the-badge)](https://github.com/Guiforge/sleepfake/blob/main/LICENSE)
 
 `SleepFake` is a compact Python package (under 100 lines) that provides a context manager to simulate the `time.sleep` and `asyncio.sleep` functions during tests. This is useful for testing time-dependent code without the need to actually wait for time to pass. The real magic behind this package comes from [freezegun](https://github.com/spulec/freezegun). 🎩✨
 
