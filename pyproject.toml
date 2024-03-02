@@ -33,6 +33,7 @@ allow-direct-references = true
 packages = ["src/sleepfake"]
 
 [tool.rye.scripts]
+test = "pytest -vvv tests"
 lint = { chain = ["lint:ruff", "lint:mypy"] }
 "lint:mypy" = "mypy --install-types src tests"
 "lint:ruff" = "ruff ."

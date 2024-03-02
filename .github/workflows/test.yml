@@ -27,6 +27,9 @@ jobs:
     - name: Install Rye
       run: |
         curl -sSf https://rye-up.com/get | RYE_INSTALL_OPTION="--yes" bash
+        rye install mypy
+        rye install ruff
+        rye install pytest
         echo "$HOME/.rye/shims" >> $GITHUB_PATH
     - name: Install dependencies
       run: |
