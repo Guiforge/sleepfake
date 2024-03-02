@@ -23,16 +23,26 @@ jobs:
       run: |
         curl -sSf https://rye-up.com/get | RYE_INSTALL_OPTION="--yes" bash
         echo "$HOME/.rye/shims" >> $GITHUB_PATH
+        source "$HOME/.rye/env"
+        rye install mypy
+        rye install ruff
+        rye install pytest
+        echo "$HOME/.rye/shims" >> $GITHUB_PATH
 
     - name: Install dependencies
       run: |
+        source "$HOME/.rye/env"
         rye sync
 
-      - name: Build
-        run: rye build
+    - name: Build
+      run: |
+        source "$HOME/.rye/env"
+        rye build
 
-      - name: Publish
-        run: rye publish
+    - name: Publish
+      run: |
+        source "$HOME/.rye/env"
+        rye publish
 
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@release/v1
