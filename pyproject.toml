@@ -12,8 +12,24 @@ dependencies = [
     "pre-commit>=3.6.2",
 ]
 readme = "README.md"
-requires-python = ">= 3.8"
-license = "MIT"
+license = 'MIT'
+classifiers = [
+    'Development Status :: 5 - Production/Stable',
+    'Programming Language :: Python',
+    'Programming Language :: Python :: Implementation :: CPython',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3 :: Only',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: MIT License',
+    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Topic :: Software Development :: Testing :: Mocking',
+]
+requires-python = '>=3.8'
 
 [build-system]
 requires = ["hatchling"]
