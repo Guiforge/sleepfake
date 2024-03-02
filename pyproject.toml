@@ -13,6 +13,7 @@ dependencies = [
 ]
 readme = "README.md"
 requires-python = ">= 3.8"
+license = "MIT"
 
 [build-system]
 requires = ["hatchling"]
@@ -24,6 +25,7 @@ dev-dependencies = [
     "mypy>=1.8.0",
     "types-pytz>=2024.1.0.20240203",
     "pytest-asyncio>=0.23.5",
+    "coverage>=7.4.3",
 ]
 
 [tool.hatch.metadata]
@@ -34,6 +36,8 @@ packages = ["src/sleepfake"]
 
 [tool.rye.scripts]
 test = "pytest -vvv tests"
+"coverage:report" = "coverage report -m"
+"coverage:launch" = "coverage run --source src -m pytest -vvv"
 lint = { chain = ["lint:ruff", "lint:mypy"] }
 "lint:mypy" = "mypy --install-types src tests"
 "lint:ruff" = "ruff ."

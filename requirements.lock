@@ -32,7 +32,7 @@ pre-commit==3.6.2
     # via sleepfake
 pytest==8.0.2
     # via sleepfake
-python-dateutil==2.9.0
+python-dateutil==2.9.0.post0
     # via freezegun
 pytz==2024.1
     # via sleepfake
