@@ -1,6 +1,6 @@
 [project]
 name = "sleepfake"
-version = "1.0.1"
+version = "1.0.2"
 description = "Fake the time.sleep/asyncio.sleep function during tests."
 authors = [
     { name = "Guillaume Pouyat", email = "guillaume.pouyat@protonmail.com" },
@@ -176,3 +176,6 @@ convention = "google"
 [tool.ruff.lint.mccabe]
 # Unlike Flake8, default to a complexity level of 10.
 max-complexity = 10
+
+[project.entry-points.pytest11]
+pytest11 = "sleepfake.plugin"

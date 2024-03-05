@@ -14,6 +14,8 @@ pip install sleepfake
 
 ## 🚀 Usage
 
+### Context Manager
+
 ```python
 import asyncio
 import time
@@ -31,7 +33,7 @@ def test_example():
     real_end = time.time()
     assert real_end - real_start < 1
 
-
+@pytest.mark.asyncio
 async def test_async_example():
     real_start = asyncio.get_event_loop().time()
     with SleepFake():
@@ -42,6 +44,29 @@ async def test_async_example():
         assert end - start >= 5  # almost 5 seconds  # noqa: PLR2004
     real_end = asyncio.get_event_loop().time()
     assert real_end - real_start < 1  # almost 0 seconds
+```
+
+### With Fixture (Beta)
+
+```python
+import asyncio
+import time
+
+from sleepfake import SleepFake
+
+def test_example(sleepfake: SleepFake):
+    start = time.time()
+    time.sleep(10)
+    end = time.time()
+    assert end - start == 10
+
+@pytest.mark.asyncio
+async def test_async_example(sleepfake: SleepFake):
+    start = asyncio.get_event_loop().time()
+    await asyncio.gather(asyncio.sleep(5), asyncio.sleep(5), asyncio.sleep(5))
+    end = asyncio.get_event_loop().time()
+    assert end - start <= 5.5  # almost 5 seconds  # noqa: PLR2004
+    assert end - start >= 5  # almost 5 seconds  # noqa: PLR2004
 ```
 
 ## Local Development
