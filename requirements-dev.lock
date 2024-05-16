@@ -10,46 +10,46 @@
 -e file:.
 cfgv==3.4.0
     # via pre-commit
-coverage==7.4.4
+coverage==7.5.1
 distlib==0.3.8
     # via virtualenv
-filelock==3.13.1
+filelock==3.14.0
     # via virtualenv
-freezegun==1.4.0
+freezegun==1.5.1
     # via sleepfake
-identify==2.5.35
+identify==2.5.36
     # via pre-commit
 iniconfig==2.0.0
     # via pytest
-mypy==1.9.0
+mypy==1.10.0
 mypy-extensions==1.0.0
     # via mypy
 nodeenv==1.8.0
     # via pre-commit
 packaging==24.0
     # via pytest
-platformdirs==4.2.0
+platformdirs==4.2.2
     # via virtualenv
-pluggy==1.4.0
+pluggy==1.5.0
     # via pytest
-pre-commit==3.6.2
+pre-commit==3.7.1
     # via sleepfake
-pytest==8.1.1
+pytest==8.2.0
     # via pytest-asyncio
     # via sleepfake
-pytest-asyncio==0.23.5.post1
+pytest-asyncio==0.23.6
 python-dateutil==2.9.0.post0
     # via freezegun
 pytz==2024.1
     # via sleepfake
 pyyaml==6.0.1
     # via pre-commit
-setuptools==69.2.0
+setuptools==69.5.1
     # via nodeenv
 six==1.16.0
     # via python-dateutil
-types-pytz==2024.1.0.20240203
-typing-extensions==4.10.0
+types-pytz==2024.1.0.20240417
+typing-extensions==4.11.0
     # via mypy
-virtualenv==20.25.1
+virtualenv==20.26.2
     # via pre-commit
