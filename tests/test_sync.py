@@ -2,6 +2,7 @@ import asyncio
 import time
 
 import pytest
+
 from sleepfake import SleepFake
 
 SLEEP_DURATION = 4
@@ -18,7 +19,7 @@ def test_sync_sleepfake():
     assert real_end_time - real_start_time < 1
 
 
-@pytest.mark.asyncio()
+@pytest.mark.asyncio
 async def test_async_sleepfake():
     real_start_time = asyncio.get_event_loop().time()
     with SleepFake():

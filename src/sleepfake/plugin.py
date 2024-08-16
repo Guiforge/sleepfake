@@ -5,7 +5,7 @@ import pytest
 from sleepfake import SleepFake
 
 
-@pytest.fixture()
+@pytest.fixture
 def sleepfake() -> Generator[SleepFake, None, None]:
     with SleepFake() as sleepfake_:
         yield sleepfake_
