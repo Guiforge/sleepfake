@@ -54,9 +54,10 @@ packages = ["src/sleepfake"]
 test = "pytest -vvv tests"
 "coverage:report" = "coverage report -m"
 "coverage:launch" = "coverage run --source src -m pytest -vvv"
-lint = { chain = ["lint:ruff", "lint:mypy"] }
+lint = { chain = ["lint:format", "lint:ruff", "lint:mypy"] }
 "lint:mypy" = "mypy --install-types src tests"
-"lint:ruff" = "ruff ."
+"lint:ruff" = "ruff check ."
+"lint:format" = "ruff format ."
 pre-commit = "pre-commit run --all-files"
 pre-commit-install = "pre-commit install"
 pre-commit-update = "pre-commit autoupdate"
@@ -84,53 +85,7 @@ no_implicit_reexport = true
 target-version = "py38"
 exclude = [".venv"]
 fix = true
-lint.select = [
-    "F",
-    "E",
-    "C90",
-    "I",
-    "N",
-    "D",
-    "UP",
-    "YTT",
-    "ANN",
-    "S",
-    "BLE",
-    "FBT",
-    "B",
-    "A",
-    "COM",
-    "C4",
-    "DTZ",
-    "T10",
-    "DJ",
-    "EM",
-    "EXE",
-    "ISC",
-    "ICN",
-    "G",
-    "INP",
-    "PIE",
-    "T20",
-    "PYI",
-    "PT",
-    "Q",
-    "RSE",
-    "RET",
-    "SLF",
-    "SIM",
-    "TID",
-    "TCH",
-    "ARG",
-    "PTH",
-    "ERA",
-    "PD",
-    "PGH",
-    "PL",
-    "TRY",
-    "NPY",
-    "RUF",
-]
+lint.select = ["ALL"]
 lint.ignore = [
     "ANN102",
     "N812",
