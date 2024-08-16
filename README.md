@@ -76,7 +76,7 @@ async def test_async_example(sleepfake: SleepFake):
 Install [rye](https://rye-up.com/)
 
 ```bash
-curl -sSf https://rye-up.com/get | bash
+curl -sSf https://rye.astral.sh/get | bash
 ```
 
 ### Install dep
