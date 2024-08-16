@@ -33,10 +33,10 @@ class SleepFake:
 
         self.time_patch = patch("time.sleep", side_effect=self.mock_sleep)
         self.asyncio_patch = patch("asyncio.sleep", side_effect=self.amock_sleep)
-        self.sleep_queue: "asyncio.Queue[tuple[datetime.datetime, asyncio.Future[None]]] | None" = (
+        self.sleep_queue: asyncio.Queue[tuple[datetime.datetime, asyncio.Future[None]]] | None = (
             None
         )
-        self.sleep_processor: "asyncio.Task[None] | None" = None
+        self.sleep_processor: asyncio.Task[None] | None = None
 
     async def _init_async_patch(self) -> None:
         if not self.sleep_processor and asyncio.get_event_loop().is_running():
@@ -96,7 +96,7 @@ class SleepFake:
         while True:
             try:
                 sleep_time, future = await self.sleep_queue.get()
-            except RuntimeError:
+            except RuntimeError:  # noqa: PERF203
                 return  # the queue is closed, when fixture pytest and pytest-asyncio
             else:
                 if self.frozen_factory.time_to_freeze < sleep_time:
