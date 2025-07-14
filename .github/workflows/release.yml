@@ -17,27 +17,19 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
-      - name: Install Rye
+      - name: Install uv
         run: |
-          curl -sSf https://rye.astral.sh/get | RYE_INSTALL_OPTION="--yes" bash
-          echo "$HOME/.rye/shims" >> $GITHUB_PATH
-          source "$HOME/.rye/env"
-          rye install mypy
-          rye install ruff
-          rye install pytest
-          echo "$HOME/.rye/shims" >> $GITHUB_PATH
+          pip install --upgrade uv
 
       - name: Install dependencies
         run: |
-          source "$HOME/.rye/env"
-          rye sync
+          uv sync --no-dev
 
       - name: Build
         run: |
-          source "$HOME/.rye/env"
-          rye build
+          uv build
 
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@release/v1
