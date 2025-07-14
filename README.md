@@ -73,28 +73,30 @@ async def test_async_example(sleepfake: SleepFake):
 
 ### Prerequisites
 
-Install [rye](https://rye-up.com/)
-
-```bash
-curl -sSf https://rye.astral.sh/get | bash
-```
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ### Install dep
 
 ```bash
-rye sync
+make dev-install
+# or
+uv sync --dev
 ```
 
 ### Run tests
 
 ```bash
-rye run test
+make test
+# or
+uv run test
 ```
 
 ### Run linter
 
 ```bash
-rye run lint
+make lint
+# or
+uv run lint
 ```
 
 ## Acknowledgments 🙏
