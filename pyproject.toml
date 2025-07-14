@@ -1,16 +1,11 @@
 [project]
 name = "sleepfake"
-version = "1.0.7"
+version = "1.0.8"
 description = "Fake the time.sleep/asyncio.sleep function during tests."
 authors = [
     { name = "Guillaume Pouyat", email = "guillaume.pouyat@protonmail.com" },
 ]
-dependencies = [
-    "freezegun>=1.4.0",
-    "pytest>=8.0.2",
-    "pytz>=2024.1",
-    "pre-commit>=3.6.2",
-]
+dependencies = ["freezegun>=1.4.0", "pytest>=8.0.2"]
 readme = "README.md"
 license = 'MIT'
 classifiers = [
@@ -19,30 +14,20 @@ classifiers = [
     'Programming Language :: Python :: Implementation :: CPython',
     'Programming Language :: Python :: 3',
     'Programming Language :: Python :: 3 :: Only',
-    'Programming Language :: Python :: 3.8',
-    'Programming Language :: Python :: 3.9',
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
     'Intended Audience :: Developers',
     'License :: OSI Approved :: MIT License',
     'Topic :: Software Development :: Libraries :: Python Modules',
     'Topic :: Software Development :: Testing :: Mocking',
 ]
-requires-python = '>=3.8'
+requires-python = '>=3.10'
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.rye]
-managed = true
-dev-dependencies = [
-    "mypy>=1.8.0",
-    "types-pytz>=2024.1.0.20240203",
-    "pytest-asyncio>=0.23.5",
-    "coverage>=7.4.3",
-]
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -50,17 +35,6 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/sleepfake"]
 
-[tool.rye.scripts]
-test = "pytest -vvv tests"
-"coverage:report" = "coverage report -m"
-"coverage:launch" = "coverage run --source src -m pytest -vvv"
-lint = { chain = ["lint:format", "lint:ruff", "lint:mypy"] }
-"lint:mypy" = "mypy --install-types src tests"
-"lint:ruff" = "ruff check ."
-"lint:format" = "ruff format ."
-pre-commit = "pre-commit run --all-files"
-pre-commit-install = "pre-commit install"
-pre-commit-update = "pre-commit autoupdate"
 
 [tool.mypy]
 platform = 'linux'
@@ -87,7 +61,6 @@ exclude = [".venv"]
 fix = true
 lint.select = ["ALL"]
 lint.ignore = [
-    "ANN102",
     "N812",
     "C417",
     "E501",
@@ -107,7 +80,6 @@ lint.ignore = [
     "EM101",
     "EM102",
     "PLW0602",
-    "ANN101",
     "FBT001",
     "D203",
     "EXE001",
@@ -134,3 +106,28 @@ max-complexity = 10
 
 [project.entry-points.pytest11]
 pytest11 = "sleepfake.plugin"
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests/"]
+addopts = "-vvv"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"                           # See pytest-asyncio plug-in
+timeout = 60
+timeout_disable_debugger_detection = false
+
+[dependency-groups]
+dev = [
+    "mypy>=1.16.1",
+    "pre-commit>=4.2.0",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.0.0",
+    "pytest-sugar>=1.0.0",
+    "ruff>=0.12.3",
+    "pytest-env",
+    "pytest-mock",
+    "pytest",
+    "pytest-timeout>=2.4.0",
+    "pytest-randomly>=3.16.0",
+    "pytest-cov>=6.2.1",
+]

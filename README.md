@@ -1,102 +1,70 @@
-# ⏰ SleepFake
+<!-- Shield Badges -->
+<p align="center">
+  <img src="./logo.svg" alt="SleepFake Logo" width="120"/>
+</p>
+<p align="center">
+  <a href="https://pypi.org/project/sleepfake/"><img src="https://img.shields.io/pypi/v/sleepfake.svg?color=blue" alt="PyPI version"></a>
+  <a href="https://github.com/spulec/freezegun"><img src="https://img.shields.io/badge/dependency-freezegun-blue" alt="freezegun"></a>
+  <img src="https://img.shields.io/badge/pytest%20fixture-alpha-orange" alt="pytest fixture alpha"/>
+</p>
 
-[![Version](https://img.shields.io/pypi/v/sleepfake?style=for-the-badge)](<https://pypi.python.org/pypi/sleepfake>)
-[![versions](https://img.shields.io/pypi/pyversions/sleepfake.svg?style=for-the-badge)](https://github.com/Guiforge/sleepfake)
-[![license](https://img.shields.io/github/license/Guiforge/sleepfake.svg?style=for-the-badge)](https://github.com/Guiforge/sleepfake/blob/main/LICENSE)
+# 💤 SleepFake: Time Travel for Your Tests
 
-`SleepFake` is a compact Python package (under 100 lines) that provides a context manager to simulate the `time.sleep` and `asyncio.sleep` functions during tests. This is useful for testing time-dependent code without the need to actually wait for time to pass. The real magic behind this package comes from [freezegun](https://github.com/spulec/freezegun). 🎩✨
+Ever wish your tests could skip the wait? **SleepFake** lets you fake `time.sleep` and `asyncio.sleep` so your tests run at lightning speed—no more wasting time waiting for the clock!
 
-## Installation
+## 🚀 Features
+
+- Instantly skip over `sleep` calls in both sync and async code
+- Works with `time.sleep` and `asyncio.sleep`
+- Compatible with pytest and pytest-asyncio
+- Supports context manager and async context manager usage
+- No more slow tests—get results fast!
+
+## ✨ Example Usage
+
+```python
+from sleepfake import SleepFake
+import time
+import asyncio
+
+# Synchronous example
+with SleepFake():
+    start = time.time()
+    time.sleep(10)  # Instantly skipped!
+    end = time.time()
+    print(f"Elapsed: {end - start:.2f}s")  # Elapsed: 10.00s
+
+# Asynchronous example
+async def main():
+    async with SleepFake():
+        start = asyncio.get_event_loop().time()
+        await asyncio.sleep(5)  # Instantly skipped!
+        end = asyncio.get_event_loop().time()
+        print(f"Elapsed: {end - start:.2f}s")  # Elapsed: 5.00s
+
+asyncio.run(main())
+```
+
+## 🧪 Why Use SleepFake?
+
+- **Speed up your test suite**: No more real waiting!
+- **Test time-based logic**: Simulate long waits, retries, and timeouts instantly.
+- **Fun to use**: Who doesn't love time travel?
+
+## 📦 Installation
 
 ```bash
 pip install sleepfake
 ```
 
-## 🚀 Usage
+## 🤝 Contributing
 
-### Context Manager
+PRs and issues welcome! Help make testing even more fun.
 
-```python
-import asyncio
-import time
+---
 
-from sleepfake import SleepFake
+Made with ❤️ and a dash of impatience.
 
+---
 
-def test_example():
-    real_start = time.time()
-    with SleepFake():
-        start = time.time()
-        time.sleep(10)
-        end = time.time()
-        assert end - start == 10
-    real_end = time.time()
-    assert real_end - real_start < 1
-
-@pytest.mark.asyncio
-async def test_async_example():
-    real_start = asyncio.get_event_loop().time()
-    with SleepFake():
-        start = asyncio.get_event_loop().time()
-        await asyncio.gather(asyncio.sleep(5), asyncio.sleep(5), asyncio.sleep(5))
-        end = asyncio.get_event_loop().time()
-        assert end - start <= 5.5  # almost 5 seconds  # noqa: PLR2004
-        assert end - start >= 5  # almost 5 seconds  # noqa: PLR2004
-    real_end = asyncio.get_event_loop().time()
-    assert real_end - real_start < 1  # almost 0 seconds
-```
-
-### With Fixture (Beta)
-
-```python
-import asyncio
-import time
-
-from sleepfake import SleepFake
-
-def test_example(sleepfake: SleepFake):
-    start = time.time()
-    time.sleep(10)
-    end = time.time()
-    assert end - start == 10
-
-@pytest.mark.asyncio
-async def test_async_example(sleepfake: SleepFake):
-    start = asyncio.get_event_loop().time()
-    await asyncio.gather(asyncio.sleep(5), asyncio.sleep(5), asyncio.sleep(5))
-    end = asyncio.get_event_loop().time()
-    assert end - start <= 5.5  # almost 5 seconds  # noqa: PLR2004
-    assert end - start >= 5  # almost 5 seconds  # noqa: PLR2004
-```
-
-## Local Development
-
-### Prerequisites
-
-Install [rye](https://rye-up.com/)
-
-```bash
-curl -sSf https://rye.astral.sh/get | bash
-```
-
-### Install dep
-
-```bash
-rye sync
-```
-
-### Run tests
-
-```bash
-rye run test
-```
-
-### Run linter
-
-```bash
-rye run lint
-```
-
-## Acknowledgments 🙏
-
-- [freezegun](https://github.com/spulec/freezegun)
+> **Note:** SleepFake uses [freezegun](https://github.com/spulec/freezegun) under the hood for time manipulation magic.
