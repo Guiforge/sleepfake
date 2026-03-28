@@ -216,8 +216,9 @@ This conftest setting is used by:
 
 Notes:
 
-- SleepFake always includes `"_pytest.timing"` in the ignore list to avoid epoch-scale `pytest --durations` output.
-- User-provided/configured ignore values are merged with the default ignore list.
+- Every ignore list is **merged** with `DEFAULT_IGNORE = ["_pytest.timing"]` — the built-in constant defined in `sleepfake.__init__`.
+  **Why it exists:** `freezegun` patches every reachable module that calls `time.*` helpers, including `_pytest.timing.perf_counter`, which pytest uses to measure wall-clock test durations. Without this exclusion, `pytest --durations` reports absurd epoch-scale values (e.g. `1,704,067,200.00s`). By always ignoring `_pytest.timing`, real clocks stay intact for pytest's own instrumentation while all other `time.*` / `asyncio.sleep` calls are still frozen.
+- User-provided/configured ignore values are appended after `DEFAULT_IGNORE` and deduplicated.
 
 **Option C — conftest.py autouse fixtures** (if you need finer control per directory):
 
