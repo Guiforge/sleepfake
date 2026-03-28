@@ -1,4 +1,4 @@
-.PHONY: clean clean-test clean-pyc clean-build docs help
+.PHONY: clean clean-test clean-pyc clean-build docs help test-all-python
 .DEFAULT_GOAL := help
 
 define BROWSER_PYSCRIPT
@@ -42,7 +42,7 @@ lint:
 	uv run ruff check --fix .
 	uv run ruff format .
 	uv run mypy --version
-	uv run mypy --python-version '3.12' --pretty --config-file pyproject.toml src
+	uv run mypy --python-version '3.10' --pretty --config-file pyproject.toml src
 	@echo "${GREEN}✅ Lint checks passed!${NOCOLOR}"
 
 test: ## run tests quickly with the default Python
@@ -50,6 +50,13 @@ test: ## run tests quickly with the default Python
 	uv run pytest --force-sugar -vvv
 
 test-all: lint test
+
+test-all-python: ## run tests against all supported Python versions
+	@for version in 3.10 3.11 3.12 3.13 3.14 3.15; do \
+		echo "${GREEN}🧪 Testing Python $$version...${NOCOLOR}"; \
+		uv run --python $$version pytest --force-sugar -vvv || exit 1; \
+	done
+	@echo "${GREEN}✅ All Python versions passed!${NOCOLOR}"
 
 pre-commit:
 	@echo "${GREEN}🔨 Running pre-commit hooks...${NOCOLOR}"

@@ -3,14 +3,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
+import sys
 import time
 from unittest.mock import patch
 
 import freezegun
 
-try:
-    from typing import Self  # Python 3.11+
-except ImportError:
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
     from typing_extensions import Self
 
 
@@ -28,7 +29,7 @@ class SleepFake:
 
     def __init__(self) -> None:
         self.sleep = time.sleep
-        self.freeze_time = freezegun.freeze_time(datetime.datetime.now(tz=datetime.UTC))
+        self.freeze_time = freezegun.freeze_time(datetime.datetime.now(tz=datetime.timezone.utc))
         self.frozen_factory = self.freeze_time.start()
         self.time_patch = patch("time.sleep", side_effect=self.mock_sleep)
         self.asyncio_patch = patch("asyncio.sleep", side_effect=self.amock_sleep)

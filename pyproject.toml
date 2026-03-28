@@ -18,6 +18,8 @@ classifiers = [
     'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
     'Programming Language :: Python :: 3.13',
+    'Programming Language :: Python :: 3.14',
+    'Programming Language :: Python :: 3.15',
     'Intended Audience :: Developers',
     'License :: OSI Approved :: MIT License',
     'Topic :: Software Development :: Libraries :: Python Modules',
@@ -49,8 +51,8 @@ no_implicit_reexport = true
 
 
 [tool.ruff]
-# Always generate Python 3.11-compatible code.
-target-version = "py38"
+# Always generate Python 3.10-compatible code.
+target-version = "py310"
 exclude = [".venv"]
 fix = true
 lint.select = ["ALL"]
