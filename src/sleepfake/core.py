@@ -30,7 +30,7 @@ _QueueItem = tuple[datetime.datetime, int, asyncio.Future[None]]
 # Keep pytest's duration timer on real clocks while preserving frozen-time behavior.
 # Keep pytest-timeout's session-expiry check on real clocks so advancing frozen time
 # during a test does not trigger a false ``session-timeout`` failure.
-DEFAULT_IGNORE: Final = ("_pytest.timing", "pytest_timeout")
+DEFAULT_IGNORE: Final[list[str]] = ["_pytest.timing", "pytest_timeout"]
 
 
 class SleepFake:
