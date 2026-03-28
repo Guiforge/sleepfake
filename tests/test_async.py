@@ -284,3 +284,65 @@ async def test_async_gather_equal_durations():
         await asyncio.gather(tagged(1), tagged(2), tagged(3))
 
     assert sorted(results) == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Fixture-based async tests (sync fixture in async test)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fixture_async_sleep(sleepfake: SleepFake) -> None:  # noqa: ARG001
+    """The sync ``sleepfake`` fixture works inside an async test."""
+    start = asyncio.get_running_loop().time()
+    await asyncio.sleep(SLEEP_DURATION)
+    end = asyncio.get_running_loop().time()
+    assert end - start >= SLEEP_DURATION
+
+
+@pytest.mark.asyncio
+async def test_fixture_async_gather(sleepfake: SleepFake) -> None:  # noqa: ARG001
+    """Concurrent gathers work through the sync fixture."""
+    start = asyncio.get_running_loop().time()
+    await asyncio.gather(
+        asyncio.sleep(SLEEP_DURATION),
+        asyncio.sleep(SLEEP_DURATION),
+    )
+    end = asyncio.get_running_loop().time()
+    assert SLEEP_DURATION <= end - start <= SLEEP_DURATION + 0.5
+
+
+# ---------------------------------------------------------------------------
+# sleepfake fixture in async tests (covers deprecated asleepfake use-cases)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_fixture_sleep(sleepfake: SleepFake) -> None:  # noqa: ARG001
+    """The ``sleepfake`` fixture works for basic async sleep."""
+    start = asyncio.get_running_loop().time()
+    await asyncio.sleep(SLEEP_DURATION)
+    end = asyncio.get_running_loop().time()
+    assert end - start >= SLEEP_DURATION
+
+
+@pytest.mark.asyncio
+async def test_async_fixture_gather(sleepfake: SleepFake) -> None:  # noqa: ARG001
+    """Concurrent gathers work through the ``sleepfake`` fixture in an async test."""
+    start = asyncio.get_running_loop().time()
+    await asyncio.gather(
+        asyncio.sleep(SLEEP_DURATION),
+        asyncio.sleep(SLEEP_DURATION),
+        asyncio.sleep(SLEEP_DURATION),
+    )
+    end = asyncio.get_running_loop().time()
+    assert SLEEP_DURATION <= end - start <= SLEEP_DURATION + 0.5
+
+
+@pytest.mark.asyncio
+async def test_async_fixture_cleanup(sleepfake: SleepFake) -> None:
+    """While the fixture is active the processor and queue are initialised."""
+    await asyncio.sleep(1)
+    # Lazy init on first amock_sleep — processor must be running now.
+    assert sleepfake.sleep_processor is not None
+    assert sleepfake.sleep_queue is not None
