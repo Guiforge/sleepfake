@@ -550,3 +550,60 @@ def test_autouse_ini_async_test(pytester: pytest.Pytester) -> None:
     """)
     result = pytester.runpytest_subprocess("-vvv", "-p", "pytest_asyncio")
     result.assert_outcomes(passed=1)
+
+
+# ---------------------------------------------------------------------------
+# pytest-timeout compatibility
+# ---------------------------------------------------------------------------
+
+
+def test_pytest_timeout_in_default_ignore() -> None:
+    """``pytest_timeout`` must be in DEFAULT_IGNORE so session-expiry uses real clocks."""
+    from sleepfake import DEFAULT_IGNORE  # noqa: PLC0415
+
+    assert "pytest_timeout" in DEFAULT_IGNORE
+
+
+def test_session_timeout_not_triggered_by_fake_sleep(pytester: pytest.Pytester) -> None:
+    """Advancing frozen time must not cause pytest-timeout's session timeout to fire.
+
+    pytest-timeout stores ``expire_time = time.time() + session_timeout`` at
+    configure time, then checks ``time.time() > expire_time`` after each test.
+    Without ``pytest_timeout`` in the freezegun ignore list the frozen clock
+    (advanced by SleepFake) would feed both sides of that comparison, causing a
+    spurious session-timeout failure whenever a test fakes a sleep longer than
+    the configured session-timeout value.
+    """
+    pytester.makeini("""
+        [pytest]
+        session_timeout = 5
+    """)
+    pytester.makepyfile("""
+        import time
+
+        def test_fake_sleep_100s(sleepfake):
+            # advances frozen time by 100 s; real wall-clock time stays < 1 ms
+            time.sleep(100)
+            assert time.time() - time.time() == 0   # just exercise frozen clock
+    """)
+    result = pytester.runpytest_subprocess("-v")
+    # The test must pass without a session-timeout failure.
+    result.assert_outcomes(passed=1)
+
+
+# ---------------------------------------------------------------------------
+# Error-path coverage for core.py
+# ---------------------------------------------------------------------------
+
+
+def test_mock_sleep_negative_raises() -> None:
+    """mock_sleep raises ValueError for negative sleep duration."""
+    with SleepFake() as sf, pytest.raises(ValueError, match="non-negative"):
+        sf.mock_sleep(-1)
+
+
+def test_mock_sleep_outside_context_raises() -> None:
+    """mock_sleep raises RuntimeError when frozen_factory is not initialised."""
+    sf = SleepFake()
+    with pytest.raises(RuntimeError, match="outside SleepFake context"):
+        sf.mock_sleep(1)

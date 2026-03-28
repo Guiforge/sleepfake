@@ -25,14 +25,13 @@ classifiers = [
     'Programming Language :: Python :: 3.14',
     'Programming Language :: Python :: 3.15',
     'Intended Audience :: Developers',
-    'License :: OSI Approved :: MIT License',
     'Topic :: Software Development :: Libraries :: Python Modules',
     'Topic :: Software Development :: Testing :: Mocking',
 ]
 requires-python = '>=3.10'
 
 [build-system]
-requires = ["uv_build>=0.7.21"]
+requires = ["uv_build>=0.11.2"]
 build-backend = "uv_build"
 
 
@@ -79,6 +78,7 @@ lint.ignore = [
     "ANN401",
     "EM101",
     "EM102",
+    "TRY003",
     "PLW0602",
     "FBT001",
     "D203",

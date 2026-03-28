@@ -346,3 +346,77 @@ async def test_async_fixture_cleanup(sleepfake: SleepFake) -> None:
     # Lazy init on first amock_sleep — processor must be running now.
     assert sleepfake.sleep_processor is not None
     assert sleepfake.sleep_queue is not None
+
+
+# ---------------------------------------------------------------------------
+# Error-path coverage for core.py
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_amock_sleep_negative_raises() -> None:
+    """amock_sleep raises ValueError for negative sleep duration."""
+    with SleepFake(), pytest.raises(ValueError, match="non-negative"):
+        await asyncio.sleep(-1)
+
+
+@pytest.mark.asyncio
+async def test_exit_drains_pending_queue_futures() -> None:
+    """Sync __exit__ cancels futures still pending in the sleep queue."""
+    import datetime as dt  # noqa: PLC0415
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[None] = loop.create_future()
+    deadline = dt.datetime.now(tz=dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(seconds=100)
+
+    with SleepFake() as sf:
+        sf.sleep_queue = asyncio.PriorityQueue()
+        sf.sleep_queue.put_nowait((deadline, 1, fut))
+
+    assert fut.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_process_sleeps_skips_cancelled_future() -> None:
+    """process_sleeps gracefully skips futures that were cancelled after queuing."""
+    import datetime as dt  # noqa: PLC0415
+
+    async with SleepFake() as sf:
+        await asyncio.sleep(0)  # trigger lazy init of queue + processor
+        assert sf.sleep_queue is not None
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[None] = loop.create_future()
+        deadline = dt.datetime.now(tz=dt.timezone.utc).replace(tzinfo=None)
+        sf._seq += 1  # noqa: SLF001
+        sf.sleep_queue.put_nowait((deadline, sf._seq, fut))  # noqa: SLF001
+        fut.cancel()
+
+        # Yield so process_sleeps can dequeue and skip the cancelled future.
+        tick: asyncio.Future[None] = loop.create_future()
+        loop.call_soon(tick.set_result, None)
+        await tick
+
+
+@pytest.mark.asyncio
+async def test_amock_sleep_not_initialized_raises() -> None:
+    """amock_sleep raises _NotInitializedError when processor is set but queue is None."""
+    from sleepfake.core import _NotInitializedError  # noqa: PLC0415
+
+    async with SleepFake() as sf:
+        await asyncio.sleep(0)  # init processor
+        real_queue = sf.sleep_queue
+        sf.sleep_queue = None  # corrupt state
+        with pytest.raises(_NotInitializedError):
+            await sf.amock_sleep(1)
+        sf.sleep_queue = real_queue  # restore for clean aclose
+
+
+@pytest.mark.asyncio
+async def test_process_sleeps_raises_when_queue_is_none() -> None:
+    """process_sleeps raises _NotInitializedError when sleep_queue is None."""
+    from sleepfake.core import _NotInitializedError  # noqa: PLC0415
+
+    sf = SleepFake()
+    with pytest.raises(_NotInitializedError):
+        await sf.process_sleeps()
