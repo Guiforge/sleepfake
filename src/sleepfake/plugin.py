@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import pathlib
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def sleepfake() -> Generator[SleepFake, None, None]:
+def sleepfake(request: pytest.FixtureRequest) -> Generator[SleepFake, None, None]:
     """Pytest fixture — works for both sync and async tests.
 
     Enters SleepFake via ``__enter__``/``__exit__``.  Inside an async test
@@ -20,12 +21,12 @@ def sleepfake() -> Generator[SleepFake, None, None]:
     processor on the first ``asyncio.sleep`` call, so no async fixture is
     needed.
     """
-    with SleepFake() as sf:
+    with SleepFake(ignore=_resolve_ignore(request.config, request.path)) as sf:
         yield sf
 
 
 @pytest.fixture
-async def asleepfake() -> AsyncGenerator[SleepFake, None]:
+async def asleepfake(request: pytest.FixtureRequest) -> AsyncGenerator[SleepFake, None]:
     """*Deprecated* — use the ``sleepfake`` fixture instead.
 
     ``sleepfake`` now works transparently in both sync and async tests.
@@ -37,7 +38,7 @@ async def asleepfake() -> AsyncGenerator[SleepFake, None]:
         DeprecationWarning,
         stacklevel=2,
     )
-    async with SleepFake() as sf:
+    async with SleepFake(ignore=_resolve_ignore(request.config, request.path)) as sf:
         yield sf
 
 
@@ -47,12 +48,18 @@ async def asleepfake() -> AsyncGenerator[SleepFake, None]:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register the ``sleepfake_autouse`` ini option and ``--sleepfake`` CLI flag."""
+    """Register SleepFake pytest config options and CLI flags."""
     parser.addini(
         "sleepfake_autouse",
         help="Apply SleepFake automatically to every test in the session.",
         type="bool",
         default=False,
+    )
+    parser.addini(
+        "sleepfake_ignore",
+        help="Module prefixes to ignore when freezing time.",
+        type="linelist",
+        default=[],
     )
     parser.addoption(
         "--sleepfake",
@@ -60,6 +67,60 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Apply SleepFake automatically to every test (same as sleepfake_autouse = true).",
     )
+    parser.addoption(
+        "--sleepfake-ignore",
+        action="append",
+        default=[],
+        metavar="MODULE",
+        help="Add a module prefix to ignore when freezing time (repeatable; merged with sleepfake_ignore ini).",
+    )
+
+
+def _configured_ignore(config: pytest.Config) -> list[str]:
+    ini = config.getini("sleepfake_ignore")
+    entries = [str(e) for e in ini] if ini else []
+    try:
+        cli: list[Any] = config.getoption("--sleepfake-ignore") or []
+        entries.extend(str(e) for e in cli)
+    except (ValueError, AttributeError):
+        pass
+    return list(dict.fromkeys(entries))
+
+
+def _conftest_ignore(config: pytest.Config, path: pathlib.Path) -> list[str]:
+    configured: object | None = None
+    nearest_depth = -1
+    for plugin in config.pluginmanager.get_plugins():
+        # Use getattr with default only for dunder (not a constant-name anti-pattern)
+        plugin_file = getattr(plugin, "__file__", None)
+        if not isinstance(plugin_file, str):
+            continue
+        plugin_path = pathlib.Path(plugin_file)
+        if plugin_path.name != "conftest.py":
+            continue
+        if not path.is_relative_to(plugin_path.parent):
+            continue
+        depth = len(plugin_path.parent.parts)
+        # plugin is a confirmed conftest module — vars() is safe
+        plugin_ns: dict[str, Any] = vars(plugin)  # type: ignore[arg-type]
+        value: Any = plugin_ns.get("pytest_sleepfake_ignore")
+        if value is None or depth < nearest_depth:
+            continue
+        nearest_depth = depth
+        configured = value
+
+    if configured is None:
+        return []
+    if isinstance(configured, str):
+        return [configured]
+    if isinstance(configured, (list, tuple)):
+        return [str(e) for e in configured]
+    return [str(configured)]
+
+
+def _resolve_ignore(config: pytest.Config, path: pathlib.Path) -> list[str]:
+    configured = [*_configured_ignore(config), *_conftest_ignore(config, path)]
+    return list(dict.fromkeys(configured))
 
 
 def _autouse_enabled(config: pytest.Config) -> bool:
@@ -76,6 +137,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "sleepfake: automatically patch time.sleep/asyncio.sleep with SleepFake",
+    )
+    config.addinivalue_line(
+        "markers",
+        "no_sleepfake: opt this test out of global autouse SleepFake patching",
     )
     if _autouse_enabled(config):
         config.pluginmanager.register(_AutouseSleepFakePlugin(), "sleepfake-autouse")
@@ -95,12 +160,14 @@ class _AutouseSleepFakePlugin:
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_setup(self, item: pytest.Item) -> None:
+        if list(item.iter_markers(name="no_sleepfake")):
+            return
         fixturenames: list[str] = getattr(item, "fixturenames", [])
         if "sleepfake" in fixturenames or "asleepfake" in fixturenames:
             return
         if list(item.iter_markers(name="sleepfake")):
             return
-        sf = SleepFake()
+        sf = SleepFake(ignore=_resolve_ignore(item.config, item.path))
         sf.__enter__()
         setattr(item, _AutouseSleepFakePlugin._ATTR, sf)
 
@@ -130,7 +197,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     fixturenames: list[str] = getattr(item, "fixturenames", [])
     if "sleepfake" in fixturenames or "asleepfake" in fixturenames:
         return
-    sf = SleepFake()
+    sf = SleepFake(ignore=_resolve_ignore(item.config, item.path))
     sf.__enter__()
     setattr(item, _MARKER_ATTR, sf)
 
