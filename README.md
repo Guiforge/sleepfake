@@ -291,8 +291,22 @@ Notes:
 
 ## ⚠️ Scope limitation
 
-SleepFake patches `time.sleep` and `asyncio.sleep` by name via `unittest.mock.patch`.
-Code that binds the function locally **before** the context is entered (for example `from time import sleep` at module import time) bypasses the patch.
+SleepFake patches `time.sleep` and `asyncio.sleep` at two levels:
+
+1. **The source module** (`time.sleep` / `asyncio.sleep`) — via `unittest.mock.patch`.
+2. **Module-level aliases in `sys.modules`** — any attribute that points to the original
+   `time.sleep` or `asyncio.sleep` at context entry is patched too. This covers the common
+   `from time import sleep` pattern at the top of a module.
+
+The one case that **cannot** be covered is a **local variable** binding created inside a
+function body before the context is entered:
+
+```python
+def hard_to_patch():
+    _sleep = time.sleep   # local variable — not visible in sys.modules
+    with SleepFake():
+        _sleep(10)        # ⚠️ calls the real time.sleep; cannot be intercepted
+```
 
 ## 🧪 How it works
 
@@ -300,6 +314,7 @@ Code that binds the function locally **before** the context is entered (for exam
 |---|---|
 | **Sync sleep** | `frozen_factory.tick(delta)` advances frozen time immediately |
 | **Async sleep** | `(deadline, seq, future)` goes into an `asyncio.PriorityQueue`; a background task resolves futures in deadline order |
+| **Broad patching** | On context entry, `sys.modules` is scanned for module-level aliases of the originals (e.g. `from time import sleep`); all matched attributes are replaced and restored on exit |
 | **Timeout safety** | After advancing time, the processor yields one event-loop turn so timeout callbacks can fire before futures resolve |
 | **Cancellation** | Cancelled futures are skipped; the processor keeps running |
 | **pytest durations** | `freeze_time(..., ignore=["_pytest.timing", ...])` avoids breaking pytest internal wall-clock timing |
