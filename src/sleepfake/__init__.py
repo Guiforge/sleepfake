@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import datetime
 import sys
+from typing import Final
 from unittest.mock import patch
 
 import freezegun
@@ -13,14 +14,13 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import Self
 
+__all__ = ["DEFAULT_IGNORE", "SleepFake"]
+
 
 class _NotInitializedError(Exception):
     def __init__(self) -> None:
         self.message = "sleep_queue is not initialized | should not happen"
         super().__init__(self.message)
-
-    def __str__(self) -> str:
-        return self.message
 
 
 # Item stored in the priority queue: (wake_deadline_naive_utc, sequence_counter, future)
@@ -28,7 +28,9 @@ class _NotInitializedError(Exception):
 _QueueItem = tuple[datetime.datetime, int, asyncio.Future[None]]
 
 # Keep pytest's duration timer on real clocks while preserving frozen-time behavior.
-DEFAULT_IGNORE = ["_pytest.timing"]
+# Keep pytest-timeout's session-expiry check on real clocks so advancing frozen time
+# during a test does not trigger a false ``session-timeout`` failure.
+DEFAULT_IGNORE: Final = ("_pytest.timing", "pytest_timeout")
 
 
 class SleepFake:
@@ -113,18 +115,34 @@ class SleepFake:
             if not self.sleep_processor.done():
                 self.sleep_processor.cancel()
             self.sleep_processor = None
+        # Cancel any futures still in the queue so coroutines awaiting them are not leaked.
+        if self.sleep_queue is not None:
+            while not self.sleep_queue.empty():
+                try:
+                    _, _, fut = self.sleep_queue.get_nowait()
+                    if not fut.done():
+                        fut.cancel()
+                except asyncio.QueueEmpty:  # noqa: PERF203
+                    break
         self.sleep_queue = None
 
     def mock_sleep(self, seconds: float) -> None:
         """A mock sleep function that advances the frozen time instead of actually sleeping."""
-        self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))  # type: ignore[union-attr]
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
+        if self.frozen_factory is None:
+            raise RuntimeError("mock_sleep called outside SleepFake context")
+        self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))
 
     async def amock_sleep(self, seconds: float) -> None:
         """A mock sleep function that advances the frozen time instead of actually sleeping.
 
         Raises:
+            ValueError: If seconds is negative.
             _NotInitializedError: If the sleep queue is not initialized.
         """
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
         # lazy initialize the sleep queue and processor (useful for async tests fixture)
         if self.sleep_processor is None:
             await self._init_async_patch()
@@ -156,8 +174,10 @@ class SleepFake:
         while True:
             try:
                 sleep_time, _seq, future = await self.sleep_queue.get()
-            except RuntimeError:  # noqa: PERF203
-                return  # the queue is closed, when fixture pytest and pytest-asyncio
+            except RuntimeError as exc:  # noqa: PERF203
+                if "event loop is closed" in str(exc).lower():
+                    return  # the queue is closed when pytest-asyncio tears down the loop
+                raise
             else:
                 if future.cancelled():
                     continue
@@ -171,6 +191,8 @@ class SleepFake:
                 # Yield exactly one event-loop iteration so that any call_at
                 # callbacks whose deadlines have now passed (e.g. asyncio.timeout)
                 # can fire and cancel pending futures before we resolve them.
+                # NOTE: cannot use ``await asyncio.sleep(0)`` here — asyncio.sleep is
+                # patched and calling it would re-enter amock_sleep causing recursion.
                 tick: asyncio.Future[None] = loop.create_future()
                 loop.call_soon(tick.set_result, None)
                 await tick

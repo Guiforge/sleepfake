@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
@@ -82,7 +82,7 @@ def _configured_ignore(config: pytest.Config) -> list[str]:
     try:
         cli: list[Any] = config.getoption("--sleepfake-ignore") or []
         entries.extend(str(e) for e in cli)
-    except (ValueError, AttributeError):
+    except ValueError:
         pass
     return list(dict.fromkeys(entries))
 
@@ -123,6 +123,11 @@ def _resolve_ignore(config: pytest.Config, path: pathlib.Path) -> list[str]:
     return list(dict.fromkeys(configured))
 
 
+def _has_marker(item: pytest.Item, name: str) -> bool:
+    """Return True if *item* has the named marker."""
+    return any(item.iter_markers(name=name))
+
+
 def _autouse_enabled(config: pytest.Config) -> bool:
     if config.getini("sleepfake_autouse"):
         return True
@@ -156,16 +161,16 @@ class _AutouseSleepFakePlugin:
     are skipped to avoid double-patching.
     """
 
-    _ATTR = "_sleepfake_autouse_sf"
+    _ATTR: ClassVar[str] = "_sleepfake_autouse_sf"
 
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_setup(self, item: pytest.Item) -> None:
-        if list(item.iter_markers(name="no_sleepfake")):
+        if _has_marker(item, "no_sleepfake"):
             return
         fixturenames: list[str] = getattr(item, "fixturenames", [])
         if "sleepfake" in fixturenames or "asleepfake" in fixturenames:
             return
-        if list(item.iter_markers(name="sleepfake")):
+        if _has_marker(item, "sleepfake"):
             return
         sf = SleepFake(ignore=_resolve_ignore(item.config, item.path))
         sf.__enter__()
@@ -192,7 +197,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     Skipped when the test already requests the ``sleepfake`` fixture (or the
     deprecated ``asleepfake``) to avoid double-patching.
     """
-    if not list(item.iter_markers(name="sleepfake")):
+    if not _has_marker(item, "sleepfake"):
         return
     fixturenames: list[str] = getattr(item, "fixturenames", [])
     if "sleepfake" in fixturenames or "asleepfake" in fixturenames:
