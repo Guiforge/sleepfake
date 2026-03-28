@@ -4,6 +4,9 @@ import asyncio
 import contextlib
 import datetime
 import sys
+import time as _time_module
+import types
+import warnings
 from typing import Final
 from unittest.mock import patch
 
@@ -32,14 +35,22 @@ _QueueItem = tuple[datetime.datetime, int, asyncio.Future[None]]
 # during a test does not trigger a false ``session-timeout`` failure.
 DEFAULT_IGNORE: Final[list[str]] = ["_pytest.timing", "pytest_timeout"]
 
+# Captured at import time, before any mock patch can replace them.
+# Used by the broad-patch mechanism to locate module-level aliases.
+_ORIG_TIME_SLEEP: Final = _time_module.sleep
+_ORIG_ASYNCIO_SLEEP: Final = asyncio.sleep
+
 
 class SleepFake:
     """Fake the time.sleep/asyncio.sleep function during tests.
 
     Note:
-        Uses ``unittest.mock.patch("time.sleep")`` / ``patch("asyncio.sleep")``.
-        Code that binds the function locally (``from time import sleep``) before
-        the context is entered will bypass the mock.
+        In addition to ``unittest.mock.patch("time.sleep")`` / ``patch("asyncio.sleep")``,
+        :class:`SleepFake` scans ``sys.modules`` on context entry and replaces any
+        module-level aliases of the real functions (e.g. ``from time import sleep``).
+        The one case that cannot be covered is a **local variable** binding created
+        inside a function body before the context is entered — those are invisible to
+        ``sys.modules`` and will still call the real ``time.sleep``.
 
     Examples:
         Synchronous — clock jumps instantly, no real wall-clock delay:
@@ -95,6 +106,55 @@ class SleepFake:
         self.sleep_queue: asyncio.PriorityQueue[_QueueItem] | None = None
         self.sleep_processor: asyncio.Task[None] | None = None
         self._seq: int = 0  # tie-breaker for equal deadlines
+        self._alias_patches: list[tuple[types.ModuleType, str, object]] = []
+
+    def _patch_module_aliases(self) -> None:
+        """Scan ``sys.modules`` and patch any module-level aliases of the real sleep functions.
+
+        This covers code that ran ``from time import sleep`` (or
+        ``from asyncio import sleep``) before the :class:`SleepFake` context was
+        entered.  All such attributes in loaded modules are replaced with the
+        corresponding mock, and the originals are recorded for restoration in
+        :meth:`_unpatch_module_aliases`.
+        """
+        self._alias_patches = []
+        # Skip the modules that either already received the main patch or hold our
+        # own internal sentinel variables (_ORIG_TIME_SLEEP / _ORIG_ASYNCIO_SLEEP).
+        _self = sys.modules.get(__name__)
+        ignore = tuple(self._ignore)
+
+        for mod_name, mod in list(sys.modules.items()):
+            if not isinstance(mod, types.ModuleType):
+                continue
+            if mod is _time_module or mod is asyncio or mod is _self:
+                continue
+            # Mirror freezegun: honour the ignore list so that ignored modules
+            # also keep their real sleep references (e.g. _pytest.timing).
+            if mod_name.startswith(ignore):
+                continue
+            try:
+                mod_dict = mod.__dict__
+            except AttributeError:  # pragma: no cover
+                continue
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for name, val in list(mod_dict.items()):
+                    if val is _ORIG_TIME_SLEEP:
+                        replacement: object = self.mock_sleep
+                    elif val is _ORIG_ASYNCIO_SLEEP:
+                        replacement = self.amock_sleep
+                    else:
+                        continue
+                    with contextlib.suppress(AttributeError, TypeError):
+                        setattr(mod, name, replacement)
+                        self._alias_patches.append((mod, name, val))
+
+    def _unpatch_module_aliases(self) -> None:
+        """Restore every module-level alias that was patched by :meth:`_patch_module_aliases`."""
+        for mod, name, original in reversed(self._alias_patches):
+            with contextlib.suppress(AttributeError, TypeError):
+                setattr(mod, name, original)
+        self._alias_patches = []
 
     def _start_freeze(self) -> None:
         if not self._freeze_started:
@@ -122,6 +182,7 @@ class SleepFake:
         self._start_freeze()
         self.time_patch.start()
         self.asyncio_patch.start()
+        self._patch_module_aliases()
         self.sleep_processor = None
         self._seq = 0
         return self
@@ -150,6 +211,7 @@ class SleepFake:
         Safe to call multiple times; subsequent calls are no-ops once the
         processor has already been stopped.
         """
+        self._unpatch_module_aliases()
         self.time_patch.stop()
         self.asyncio_patch.stop()
         self._stop_freeze()
@@ -178,6 +240,7 @@ class SleepFake:
             exc_val: The exception instance, or ``None``.
             exc_tb: The traceback, or ``None``.
         """
+        self._unpatch_module_aliases()
         self.time_patch.stop()
         self.asyncio_patch.stop()
         self._stop_freeze()

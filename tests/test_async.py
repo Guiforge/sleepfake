@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import types
 
 import pytest
 
@@ -420,3 +421,28 @@ async def test_process_sleeps_raises_when_queue_is_none() -> None:
     sf = SleepFake()
     with pytest.raises(_NotInitializedError):
         await sf.process_sleeps()
+
+
+# ---------------------------------------------------------------------------
+# Broad patching — asyncio.sleep module-level aliases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_broad_patch_asyncio_sleep_module_alias() -> None:
+    """SleepFake patches module-level ``from asyncio import sleep`` aliases in sys.modules."""
+    original_sleep = asyncio.sleep  # capture before any context is active
+    fake_mod = types.ModuleType("_sleepfake_test_broad_async")
+    fake_mod.sleep = original_sleep  # type: ignore[attr-defined]  # simulates ``from asyncio import sleep``
+    sys.modules["_sleepfake_test_broad_async"] = fake_mod
+    try:
+        with SleepFake():
+            # The alias must have been replaced with a mock (not the original coroutine).
+            assert fake_mod.sleep is not original_sleep  # type: ignore[attr-defined]
+            start = asyncio.get_running_loop().time()
+            await fake_mod.sleep(5)  # type: ignore[attr-defined]
+            assert asyncio.get_running_loop().time() - start >= 5  # noqa: PLR2004
+        # After exit the alias is restored.
+        assert fake_mod.sleep is original_sleep  # type: ignore[attr-defined]
+    finally:
+        sys.modules.pop("_sleepfake_test_broad_async", None)

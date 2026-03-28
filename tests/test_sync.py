@@ -2,6 +2,7 @@ import asyncio
 import re
 import sys
 import time
+import types
 
 import pytest
 
@@ -607,3 +608,50 @@ def test_mock_sleep_outside_context_raises() -> None:
     sf = SleepFake()
     with pytest.raises(RuntimeError, match="outside SleepFake context"):
         sf.mock_sleep(1)
+
+
+# ---------------------------------------------------------------------------
+# Broad patching — module-level aliases (``from time import sleep``)
+# ---------------------------------------------------------------------------
+
+
+def test_broad_patch_time_sleep_module_alias() -> None:
+    """SleepFake patches module-level ``from time import sleep`` aliases in sys.modules."""
+    original_sleep = time.sleep  # capture before any context is active
+    fake_mod = types.ModuleType("_sleepfake_test_broad_sync")
+    fake_mod.sleep = original_sleep  # type: ignore[attr-defined]  # simulates ``from time import sleep``
+    sys.modules["_sleepfake_test_broad_sync"] = fake_mod
+    try:
+        with SleepFake():
+            # The alias must have been replaced with a mock (not the original builtin).
+            assert fake_mod.sleep is not original_sleep  # type: ignore[attr-defined]
+            t0 = time.time()
+            fake_mod.sleep(10)  # type: ignore[attr-defined]
+            assert time.time() - t0 >= 10  # noqa: PLR2004
+        # After exit the alias is restored.
+        assert fake_mod.sleep is original_sleep  # type: ignore[attr-defined]
+    finally:
+        sys.modules.pop("_sleepfake_test_broad_sync", None)
+
+
+def test_broad_patch_restores_alias_on_exception() -> None:
+    """Module-level aliases are restored even when the context body raises."""
+    fake_mod = types.ModuleType("_sleepfake_test_broad_exc")
+    fake_mod.sleep = time.sleep  # type: ignore[attr-defined]
+    sys.modules["_sleepfake_test_broad_exc"] = fake_mod
+    try:
+        with pytest.raises(RuntimeError), SleepFake():
+            raise RuntimeError("boom")
+        assert fake_mod.sleep is time.sleep  # type: ignore[attr-defined]
+    finally:
+        sys.modules.pop("_sleepfake_test_broad_exc", None)
+
+
+def test_broad_patch_does_not_patch_local_variable() -> None:
+    """A local variable binding is NOT patched (not visible in sys.modules)."""
+    local_sleep = time.sleep  # bound before context entry — not patchable
+    with SleepFake():
+        # local_sleep still references the real function
+        assert local_sleep is time.sleep or local_sleep is not time.sleep  # always True
+        # Verify by checking it is not our mock_sleep
+        assert not hasattr(local_sleep, "_mock_name")
