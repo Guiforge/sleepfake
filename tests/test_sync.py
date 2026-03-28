@@ -559,7 +559,7 @@ def test_autouse_ini_async_test(pytester: pytest.Pytester) -> None:
 
 def test_pytest_timeout_in_default_ignore() -> None:
     """``pytest_timeout`` must be in DEFAULT_IGNORE so session-expiry uses real clocks."""
-    from sleepfake import DEFAULT_IGNORE
+    from sleepfake import DEFAULT_IGNORE  # noqa: PLC0415
 
     assert "pytest_timeout" in DEFAULT_IGNORE
 
@@ -589,3 +589,21 @@ def test_session_timeout_not_triggered_by_fake_sleep(pytester: pytest.Pytester) 
     result = pytester.runpytest_subprocess("-v")
     # The test must pass without a session-timeout failure.
     result.assert_outcomes(passed=1)
+
+
+# ---------------------------------------------------------------------------
+# Error-path coverage for core.py
+# ---------------------------------------------------------------------------
+
+
+def test_mock_sleep_negative_raises() -> None:
+    """mock_sleep raises ValueError for negative sleep duration."""
+    with SleepFake() as sf, pytest.raises(ValueError, match="non-negative"):
+        sf.mock_sleep(-1)
+
+
+def test_mock_sleep_outside_context_raises() -> None:
+    """mock_sleep raises RuntimeError when frozen_factory is not initialised."""
+    sf = SleepFake()
+    with pytest.raises(RuntimeError, match="outside SleepFake context"):
+        sf.mock_sleep(1)

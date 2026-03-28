@@ -11,7 +11,7 @@ import freezegun
 
 if sys.version_info >= (3, 11):
     from typing import Self
-else:
+else:  # pragma: no cover
     from typing_extensions import Self
 
 __all__ = ["DEFAULT_IGNORE", "SleepFake"]
@@ -122,7 +122,7 @@ class SleepFake:
                     _, _, fut = self.sleep_queue.get_nowait()
                     if not fut.done():
                         fut.cancel()
-                except asyncio.QueueEmpty:  # noqa: PERF203
+                except asyncio.QueueEmpty:  # noqa: PERF203  # pragma: no cover
                     break
         self.sleep_queue = None
 
@@ -175,9 +175,9 @@ class SleepFake:
             try:
                 sleep_time, _seq, future = await self.sleep_queue.get()
             except RuntimeError as exc:  # noqa: PERF203
-                if "event loop is closed" in str(exc).lower():
+                if "event loop is closed" in str(exc).lower():  # pragma: no cover
                     return  # the queue is closed when pytest-asyncio tears down the loop
-                raise
+                raise  # pragma: no cover
             else:
                 if future.cancelled():
                     continue
