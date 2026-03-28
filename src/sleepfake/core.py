@@ -104,6 +104,15 @@ class SleepFake:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.sleep_processor
             self.sleep_processor = None
+        # Cancel any futures still in the queue so coroutines awaiting them are not leaked.
+        if self.sleep_queue is not None:
+            while not self.sleep_queue.empty():
+                try:
+                    _, _, fut = self.sleep_queue.get_nowait()
+                    if not fut.done():
+                        fut.cancel()
+                except asyncio.QueueEmpty:  # noqa: PERF203  # pragma: no cover
+                    break
         self.sleep_queue = None
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
