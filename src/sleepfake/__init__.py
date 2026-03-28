@@ -29,7 +29,13 @@ _QueueItem = tuple[datetime.datetime, int, asyncio.Future[None]]
 
 
 class SleepFake:
-    """Fake the time.sleep/asyncio.sleep function during tests."""
+    """Fake the time.sleep/asyncio.sleep function during tests.
+
+    Note:
+        Uses ``unittest.mock.patch("time.sleep")`` / ``patch("asyncio.sleep")``.
+        Code that binds the function locally (``from time import sleep``) before
+        the context is entered will bypass the mock.
+    """
 
     def __init__(self) -> None:
         self.freeze_time = freezegun.freeze_time(datetime.datetime.now(tz=datetime.timezone.utc))
@@ -43,8 +49,27 @@ class SleepFake:
 
     def _start_freeze(self) -> None:
         if not self._freeze_started:
+            # Capture _pytest.timing.perf_counter *before* starting the freeze.
+            # Freezegun's to_patch mechanism scans sys.modules and replaces every
+            # module attribute equal to the real perf_counter with its frozen stub,
+            # including _pytest.timing.perf_counter which pytest uses to compute
+            # --durations. Restoring it causes pytest to keep using the real
+            # boot-relative clock, so reported durations stay near zero.
+            _timing_module = None
+            _real_pc = None
+            try:
+                import _pytest.timing  # noqa: PLC0415
+
+                _timing_module = _pytest.timing
+                _real_pc = _pytest.timing.perf_counter
+            except ImportError:
+                pass
+
             self.frozen_factory = self.freeze_time.start()
             self._freeze_started = True
+
+            if _timing_module is not None:
+                _timing_module.perf_counter = _real_pc  # type: ignore[assignment]
 
     def _stop_freeze(self) -> None:
         if self._freeze_started:
