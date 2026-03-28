@@ -291,7 +291,7 @@ Notes:
 
 ## ⚠️ Scope limitation
 
-SleepFake patches `time.sleep` and `asyncio.sleep` at three levels:
+SleepFake patches `time.sleep` and `asyncio.sleep` at two levels:
 
 1. **The source module** (`time.sleep` / `asyncio.sleep`) — via `unittest.mock.patch`.
 2. **Module-level aliases in `sys.modules`** — any attribute that points to the original

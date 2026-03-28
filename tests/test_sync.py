@@ -649,9 +649,10 @@ def test_broad_patch_restores_alias_on_exception() -> None:
 
 def test_broad_patch_does_not_patch_local_variable() -> None:
     """A local variable binding is NOT patched (not visible in sys.modules)."""
+    original_sleep = time.sleep
     local_sleep = time.sleep  # bound before context entry — not patchable
     with SleepFake():
-        # local_sleep still references the real function
-        assert local_sleep is time.sleep or local_sleep is not time.sleep  # always True
-        # Verify by checking it is not our mock_sleep
-        assert not hasattr(local_sleep, "_mock_name")
+        # local_sleep still references the original real function
+        assert local_sleep is original_sleep
+        # But the global time.sleep has been patched inside the context
+        assert time.sleep is not original_sleep
