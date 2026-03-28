@@ -103,7 +103,7 @@ class SleepFake:
 
     def mock_sleep(self, seconds: float) -> None:
         """A mock sleep function that advances the frozen time instead of actually sleeping."""
-        self.frozen_factory.move_to(datetime.timedelta(seconds=seconds))  # type: ignore[union-attr]
+        self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))  # type: ignore[union-attr]
 
     async def amock_sleep(self, seconds: float) -> None:
         """A mock sleep function that advances the frozen time instead of actually sleeping.
