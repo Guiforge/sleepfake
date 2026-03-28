@@ -50,6 +50,17 @@ async def test_async():
         assert asyncio.get_running_loop().time() - start >= 5
 ```
 
+You can customize freezegun module ignores via `ignore`:
+
+```python
+from sleepfake import SleepFake
+
+# `_pytest.timing` is always ignored by default to keep pytest durations sane.
+# Add your own modules as needed.
+with SleepFake(ignore=["my_project.telemetry"]):
+    ...
+```
+
 ### As a pytest fixture
 
 Install once; the `sleepfake` fixture is available in every test session automatically.
@@ -114,12 +125,23 @@ async def test_marked_async():
 # pyproject.toml
 [tool.pytest.ini_options]
 sleepfake_autouse = true
+sleepfake_ignore = ["my_project.telemetry", "my_project.metrics"]
+```
+
+```ini
+# pytest.ini
+[pytest]
+sleepfake_autouse = true
+sleepfake_ignore =
+    my_project.telemetry
+    my_project.metrics
 ```
 
 **Option B — CLI flag** (useful for one-off runs or CI overrides):
 
 ```bash
 pytest --sleepfake
+pytest --sleepfake --sleepfake-ignore my_project.telemetry --sleepfake-ignore my_project.metrics
 ```
 
 Both activate SleepFake automatically for every test in the session:
@@ -140,6 +162,63 @@ async def test_async_no_decoration():
 ```
 
 Double-patching is prevented: if a test also requests the `sleepfake` fixture or carries `@pytest.mark.sleepfake`, the autouse layer is skipped for that test.
+
+### Disabling autouse for specific tests
+
+When autouse is on globally, mark individual tests with `@pytest.mark.no_sleepfake` to opt them out:
+
+```python
+import time
+import pytest
+
+# This test runs with SleepFake (autouse applies).
+def test_patched():
+    start = time.time()
+    time.sleep(100)
+    assert time.time() - start >= 100
+
+# This test uses real time — SleepFake is NOT applied.
+@pytest.mark.no_sleepfake
+def test_needs_real_time():
+    start = time.time()
+    time.sleep(0.01)          # real sleep, returns fast
+    assert time.time() - start < 5
+```
+
+`@pytest.mark.no_sleepfake` only affects the autouse layer. Tests that explicitly request the `sleepfake` fixture are unaffected (the fixture always patches).
+
+### Configure ignores in `conftest.py`
+
+If you want project- or directory-specific ignore rules without putting them in
+`pyproject.toml`, define `pytest_sleepfake_ignore` in `conftest.py`:
+
+```python
+# conftest.py
+pytest_sleepfake_ignore = ["my_project.telemetry", "my_project.metrics"]
+```
+
+This conftest setting is used by:
+
+- the `sleepfake` fixture
+- `@pytest.mark.sleepfake`
+- global autouse mode (`sleepfake_autouse = true` or `--sleepfake`)
+
+### Options reference (API, CLI, and config)
+
+| Where | Option | Example | Purpose |
+|---|---|---|---|
+| Python API (`SleepFake`) | `ignore: list[str] \| None` | `SleepFake(ignore=["my.module"])` | Add module prefixes freezegun should ignore while freezing time. |
+| Pytest CLI | `--sleepfake` | `pytest --sleepfake` | Enable SleepFake for every test in the session. |
+| Pytest CLI | `--sleepfake-ignore MODULE` | `pytest --sleepfake-ignore my.module` | Add a module prefix to ignore (repeatable; merged with `sleepfake_ignore`). |
+| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_autouse = true` | `[tool.pytest.ini_options]\nsleepfake_autouse = true` | Same as `--sleepfake`, but persisted in config. |
+| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_ignore` | `sleepfake_ignore = ["my.module"]` | Add module prefixes to ignore for all pytest-managed SleepFake usage. |
+| `conftest.py` | `pytest_sleepfake_ignore` | `pytest_sleepfake_ignore = ["my.module"]` | Override ignore prefixes for a test subtree (directory-scoped). |
+
+Notes:
+
+- Every ignore list is **merged** with `DEFAULT_IGNORE = ["_pytest.timing"]` — the built-in constant defined in `sleepfake.__init__`.
+  **Why it exists:** `freezegun` patches every reachable module that calls `time.*` helpers, including `_pytest.timing.perf_counter`, which pytest uses to measure wall-clock test durations. Without this exclusion, `pytest --durations` reports absurd epoch-scale values (e.g. `1,704,067,200.00s`). By always ignoring `_pytest.timing`, real clocks stay intact for pytest's own instrumentation while all other `time.*` / `asyncio.sleep` calls are still frozen.
+- User-provided/configured ignore values are appended after `DEFAULT_IGNORE` and deduplicated.
 
 **Option C — conftest.py autouse fixtures** (if you need finer control per directory):
 
@@ -188,7 +267,7 @@ Code that binds the function locally **before** the context is entered — e.g.
 | **Async sleep** | `(deadline, seq, future)` pushed onto an `asyncio.PriorityQueue`; background task resolves futures in deadline order |
 | **Timeout safety** | After advancing the clock, the processor yields one event-loop iteration so `asyncio.timeout` call-at callbacks can fire before futures are resolved |
 | **Cancellation** | Cancelled futures are skipped; `process_sleeps` keeps running |
-| **pytest durations** | `_pytest.timing.perf_counter` is restored after `freeze_time.start()` to prevent epoch-scale `--durations` output |
+| **pytest durations** | `freeze_time(..., ignore=["_pytest.timing", ...])` keeps pytest timing internals on real clocks to prevent epoch-scale `--durations` output |
 
 ## 🤝 Contributing
 

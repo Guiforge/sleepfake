@@ -85,8 +85,9 @@ def test_durations_not_epoch_scale(pytester: pytest.Pytester) -> None:
     """Pytest --durations must not show epoch-scale values when sleepfake is active.
 
     Freezegun's to_patch mechanism replaces _pytest.timing.perf_counter with a
-    frozen stub, producing multi-billion-second durations.  SleepFake must restore
-    the real function after freeze_time.start() so pytest's timer keeps ticking.
+    frozen stub, producing multi-billion-second durations. SleepFake must pass
+    ``ignore=["_pytest.timing"]`` to ``freeze_time()`` so pytest internals keep
+    using real timers.
     """
     pytester.makepyfile("""
         import pytest
@@ -105,6 +106,189 @@ def test_durations_not_epoch_scale(pytester: pytest.Pytester) -> None:
         m = re.match(r"^\s*([\d.]+)s\b", line)
         if m:
             assert float(m.group(1)) < 60.0, f"Epoch-scale duration detected: {line!r}"  # noqa: PLR2004
+
+
+def test_default_ignore_includes_pytest() -> None:
+    """SleepFake should always ignore ``_pytest.timing`` by default."""
+    sf = SleepFake()
+    configured_ignore = tuple(sf.freeze_time.ignore)
+    assert "_pytest.timing" in configured_ignore
+
+
+def test_custom_ignore_extends_default_ignore() -> None:
+    """Custom ignore entries should be merged with the default ignore list."""
+    sf = SleepFake(ignore=["my_custom_module"])
+    configured_ignore = tuple(sf.freeze_time.ignore)
+    assert "_pytest.timing" in configured_ignore
+    assert "my_custom_module" in configured_ignore
+
+
+def test_ini_ignore_applies_to_autouse_sleepfake(pytester: pytest.Pytester) -> None:
+    """Configured ignore entries from pytest ini should be used in autouse mode."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+        sleepfake_ignore =
+            helper
+    """)
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """,
+        test_ini_ignore="""
+            import time
+            import helper
+
+            def test_ignored_module_keeps_real_time():
+                before = helper.now()
+                time.sleep(100)
+                after = helper.now()
+                assert after - before < 1
+        """,
+    )
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)
+
+
+def test_conftest_sleepfake_ignore_fixture_applies_to_marker(pytester: pytest.Pytester) -> None:
+    """A ``pytest_sleepfake_ignore`` value in conftest.py should affect marker setup."""
+    pytester.makeconftest("""
+        pytest_sleepfake_ignore = ["helper"]
+    """)
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """,
+        test_conftest_ignore="""
+            import time
+            import pytest
+            import helper
+
+            @pytest.mark.sleepfake
+            def test_ignored_module_keeps_real_time():
+                before = helper.now()
+                time.sleep(100)
+                after = helper.now()
+                assert after - before < 1
+        """,
+    )
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)
+
+
+def test_cli_ignore_flag_extends_ignore(pytester: pytest.Pytester) -> None:
+    """``--sleepfake-ignore MODULE`` CLI flag should extend module ignores in autouse mode."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+    """)
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """,
+        test_cli_ignore="""
+            import time
+            import helper
+
+            def test_ignored_module_keeps_real_time():
+                before = helper.now()
+                time.sleep(100)
+                after = helper.now()
+                assert after - before < 1
+        """,
+    )
+    result = pytester.runpytest_subprocess("-vvv", "--sleepfake-ignore", "helper")
+    result.assert_outcomes(passed=1)
+
+
+def test_ini_ignore_applies_to_fixture(pytester: pytest.Pytester) -> None:
+    """``sleepfake_ignore`` ini option should be respected by the ``sleepfake`` fixture."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_ignore =
+            helper
+    """)
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """,
+        test_ini_ignore_fixture="""
+            import time
+            import helper
+
+            def test_fixture_respects_ignore(sleepfake):
+                before = helper.now()
+                time.sleep(100)
+                after = helper.now()
+                assert after - before < 1
+        """,
+    )
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)
+
+
+def test_conftest_ignore_applies_to_fixture(pytester: pytest.Pytester) -> None:
+    """A ``pytest_sleepfake_ignore`` value in conftest.py should be respected by the ``sleepfake`` fixture."""
+    pytester.makeconftest("""
+        pytest_sleepfake_ignore = ["helper"]
+    """)
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """,
+        test_conftest_ignore_fixture="""
+            import time
+            import helper
+
+            def test_fixture_respects_ignore(sleepfake):
+                before = helper.now()
+                time.sleep(100)
+                after = helper.now()
+                assert after - before < 1
+        """,
+    )
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)
+
+
+def test_no_sleepfake_marker_opts_out_of_autouse(pytester: pytest.Pytester) -> None:
+    """``@pytest.mark.no_sleepfake`` should prevent autouse from patching that test."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+    """)
+    pytester.makepyfile("""
+        import time
+        import pytest
+
+        def test_patched():
+            start = time.time()
+            time.sleep(100)
+            assert time.time() - start >= 100
+
+        @pytest.mark.no_sleepfake
+        def test_real_sleep_not_patched():
+            start = time.time()
+            time.sleep(0.01)          # real sleep — must finish fast
+            assert time.time() - start < 5   # would be >=100 if patched
+    """)
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=2)
 
 
 # ---------------------------------------------------------------------------
