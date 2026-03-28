@@ -242,3 +242,115 @@ def test_pytest_timeout_not_affected_by_frozen_time(pytester: pytest.Pytester) -
     """)
     result = pytester.runpytest_subprocess("-vvv")
     result.assert_outcomes(passed=1)
+
+
+# ---------------------------------------------------------------------------
+# sleepfake_autouse ini option
+# ---------------------------------------------------------------------------
+
+
+def test_autouse_ini_applies_sleepfake_globally(pytester: pytest.Pytester) -> None:
+    """sleepfake_autouse = true must patch every test without any fixture or marker."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+    """)
+    pytester.makepyfile("""
+        import time
+
+        def test_no_fixture():
+            start = time.time()
+            time.sleep(100)
+            assert time.time() - start >= 100
+
+        def test_also_no_fixture():
+            start = time.time()
+            time.sleep(50)
+            assert time.time() - start >= 50
+    """)
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=2)
+
+
+def test_autouse_ini_no_double_patch_with_fixture(pytester: pytest.Pytester) -> None:
+    """When autouse is on and the fixture is also requested, only one SleepFake is active."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+    """)
+    pytester.makepyfile("""
+        import time
+
+        def test_with_fixture(sleepfake):
+            start = time.time()
+            time.sleep(10)
+            assert time.time() - start >= 10
+    """)
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)
+
+
+def test_autouse_ini_no_double_patch_with_marker(pytester: pytest.Pytester) -> None:
+    """When autouse is on and a test also has the marker, only one SleepFake is active."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+    """)
+    pytester.makepyfile("""
+        import time
+        import pytest
+
+        @pytest.mark.sleepfake
+        def test_marker_plus_autouse():
+            start = time.time()
+            time.sleep(10)
+            assert time.time() - start >= 10
+    """)
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)
+
+
+def test_cli_flag_applies_sleepfake_globally(pytester: pytest.Pytester) -> None:
+    """``--sleepfake`` CLI flag must patch every test, same as sleepfake_autouse = true."""
+    pytester.makepyfile("""
+        import time
+
+        def test_no_fixture():
+            start = time.time()
+            time.sleep(100)
+            assert time.time() - start >= 100
+    """)
+    result = pytester.runpytest_subprocess("-vvv", "--sleepfake")
+    result.assert_outcomes(passed=1)
+
+
+def test_cli_flag_async_test(pytester: pytest.Pytester) -> None:
+    """``--sleepfake`` CLI flag must also patch async tests."""
+    pytester.makepyfile("""
+        import asyncio
+
+        async def test_async_no_fixture():
+            start = asyncio.get_running_loop().time()
+            await asyncio.sleep(100)
+            assert asyncio.get_running_loop().time() - start >= 100
+    """)
+    result = pytester.runpytest_subprocess("-vvv", "--sleepfake")
+    result.assert_outcomes(passed=1)
+
+
+def test_autouse_ini_async_test(pytester: pytest.Pytester) -> None:
+    """sleepfake_autouse = true must also patch async tests."""
+    pytester.makeini("""
+        [pytest]
+        sleepfake_autouse = true
+    """)
+    pytester.makepyfile("""
+        import asyncio
+
+        async def test_async_no_fixture():
+            start = asyncio.get_running_loop().time()
+            await asyncio.sleep(100)
+            assert asyncio.get_running_loop().time() - start >= 100
+    """)
+    result = pytester.runpytest_subprocess("-vvv")
+    result.assert_outcomes(passed=1)

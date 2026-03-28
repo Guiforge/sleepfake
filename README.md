@@ -36,11 +36,11 @@ import time
 import asyncio
 from sleepfake import SleepFake
 
-# Sync — frozen clock advances, wall clock doesn't
+# Sync
 with SleepFake():
     start = time.time()
     time.sleep(10)           # returns instantly
-    assert time.time() - start >= 10  # frozen clock advanced
+    assert time.time() - start >= 10
 
 # Async — use async with for proper cleanup of the background processor
 async def test_async():
@@ -54,7 +54,7 @@ async def test_async():
 
 Install once; the `sleepfake` and `asleepfake` fixtures are available in every test session automatically.
 
-**`sleepfake`** (sync fixture — fine for sync tests and simple async tests):
+**`sleepfake`** (sync fixture):
 
 ```python
 import time
@@ -65,7 +65,7 @@ def test_retry_logic(sleepfake):
     assert time.time() - start >= 30
 ```
 
-**`asleepfake`** (async fixture — recommended for async-heavy tests; properly awaits the background processor task on teardown):
+**`asleepfake`** (async fixture — recommended for async tests; properly awaits the background processor task on teardown):
 
 ```python
 import asyncio
@@ -105,6 +105,58 @@ async def test_marked_async():
 ```
 
 > If a test requests the `sleepfake` or `asleepfake` fixture *and* carries the marker, the marker is a no-op — double-patching is prevented automatically.
+
+### Global autouse (every test, zero boilerplate)
+
+**Option A — config file** (`pyproject.toml` or `pytest.ini`):
+
+```toml
+# pyproject.toml
+[tool.pytest.ini_options]
+sleepfake_autouse = true
+```
+
+**Option B — CLI flag** (useful for one-off runs or CI overrides):
+
+```bash
+pytest --sleepfake
+```
+
+Both activate SleepFake automatically for every test in the session:
+
+```python
+import time
+import asyncio
+
+def test_no_decoration_needed():
+    start = time.time()
+    time.sleep(100)          # patched automatically
+    assert time.time() - start >= 100
+
+async def test_async_no_decoration():
+    start = asyncio.get_running_loop().time()
+    await asyncio.sleep(100)
+    assert asyncio.get_running_loop().time() - start >= 100
+```
+
+Double-patching is prevented: if a test also requests the `sleepfake`/`asleepfake` fixture or carries `@pytest.mark.sleepfake`, the autouse layer is skipped for that test.
+
+**Option C — conftest.py autouse fixtures** (if you need finer control per directory):
+
+```python
+# conftest.py
+import pytest
+
+@pytest.fixture(autouse=True)
+def _sleepfake_sync(sleepfake):
+    """Auto-apply SleepFake for every test (sync and async)."""
+
+@pytest.fixture(autouse=True)
+async def _sleepfake_async(sleepfake):
+    """Async counterpart — shares the same sleepfake instance; no double-patch."""
+```
+
+Both fixtures reference the same `sleepfake` instance: sync tests get `_sleepfake_sync` only, async tests get both but share one `SleepFake` (no double-patch).
 
 ### `asyncio.timeout` integration
 

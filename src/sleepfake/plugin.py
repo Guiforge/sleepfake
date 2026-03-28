@@ -28,19 +28,80 @@ async def asleepfake() -> AsyncGenerator[SleepFake, None]:
 
 
 # ---------------------------------------------------------------------------
-# @pytest.mark.sleepfake — auto-apply SleepFake to marked tests
+# sleepfake_autouse ini option  /  --sleepfake CLI flag
 # ---------------------------------------------------------------------------
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the ``sleepfake_autouse`` ini option and ``--sleepfake`` CLI flag."""
+    parser.addini(
+        "sleepfake_autouse",
+        help="Apply SleepFake automatically to every test in the session.",
+        type="bool",
+        default=False,
+    )
+    parser.addoption(
+        "--sleepfake",
+        action="store_true",
+        default=False,
+        help="Apply SleepFake automatically to every test (same as sleepfake_autouse = true).",
+    )
+
+
+def _autouse_enabled(config: pytest.Config) -> bool:
+    if config.getini("sleepfake_autouse"):
+        return True
+    try:
+        return bool(config.getoption("sleepfake"))
+    except (ValueError, AttributeError):
+        return False
+
+
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the ``sleepfake`` marker."""
+    """Register the ``sleepfake`` marker and optionally enable autouse mode."""
     config.addinivalue_line(
         "markers",
         "sleepfake: automatically patch time.sleep/asyncio.sleep with SleepFake",
     )
+    if _autouse_enabled(config):
+        config.pluginmanager.register(_AutouseSleepFakePlugin(), "sleepfake-autouse")
 
 
-_SLEEPFAKE_ATTR = "_sleepfake_instance"
+class _AutouseSleepFakePlugin:
+    """Registered when ``sleepfake_autouse = true`` or ``--sleepfake`` is passed.
+
+    Uses setup/teardown hooks (not autouse fixtures) so exactly one SleepFake
+    context is entered per test, regardless of sync vs async, without touching
+    the fixture discovery machinery.  Tests that already use the
+    ``sleepfake``/``asleepfake`` fixture or ``@pytest.mark.sleepfake`` are
+    skipped to avoid double-patching.
+    """
+
+    _ATTR = "_sleepfake_autouse_sf"
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_setup(self, item: pytest.Item) -> None:
+        fixturenames: list[str] = getattr(item, "fixturenames", [])
+        if "sleepfake" in fixturenames or "asleepfake" in fixturenames:
+            return
+        if list(item.iter_markers(name="sleepfake")):
+            return
+        sf = SleepFake()
+        sf.__enter__()
+        setattr(item, _AutouseSleepFakePlugin._ATTR, sf)
+
+    def pytest_runtest_teardown(self, item: pytest.Item) -> None:
+        sf: SleepFake | None = getattr(item, _AutouseSleepFakePlugin._ATTR, None)
+        if sf is not None:
+            sf.__exit__(None, None, None)
+            delattr(item, _AutouseSleepFakePlugin._ATTR)
+
+
+# ---------------------------------------------------------------------------
+# @pytest.mark.sleepfake — auto-apply SleepFake to marked tests
+# ---------------------------------------------------------------------------
+
+_MARKER_ATTR = "_sleepfake_marker_sf"
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -52,20 +113,17 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     """
     if not list(item.iter_markers(name="sleepfake")):
         return
-
-    # Avoid double-patching when the fixture is also requested.
     fixturenames: list[str] = getattr(item, "fixturenames", [])
     if "sleepfake" in fixturenames or "asleepfake" in fixturenames:
         return
-
     sf = SleepFake()
     sf.__enter__()
-    setattr(item, _SLEEPFAKE_ATTR, sf)
+    setattr(item, _MARKER_ATTR, sf)
 
 
 def pytest_runtest_teardown(item: pytest.Item) -> None:
     """Exit the SleepFake context opened by the marker hook."""
-    sf: SleepFake | None = getattr(item, _SLEEPFAKE_ATTR, None)
+    sf: SleepFake | None = getattr(item, _MARKER_ATTR, None)
     if sf is not None:
         sf.__exit__(None, None, None)
-        delattr(item, _SLEEPFAKE_ATTR)
+        delattr(item, _MARKER_ATTR)
