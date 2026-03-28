@@ -5,7 +5,11 @@ description = "Fake the time.sleep/asyncio.sleep function during tests."
 authors = [
     { name = "Guillaume Pouyat", email = "guillaume.pouyat@protonmail.com" },
 ]
-dependencies = ["freezegun>=1.4.0", "pytest>=8.0.2"]
+dependencies = [
+    "freezegun>=1.4.0",
+    "pytest>=8.0.2",
+    "typing-extensions>=4.0; python_version < '3.11'",
+]
 readme = "README.md"
 license = 'MIT'
 classifiers = [
