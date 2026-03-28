@@ -40,9 +40,48 @@ class SleepFake:
         Uses ``unittest.mock.patch("time.sleep")`` / ``patch("asyncio.sleep")``.
         Code that binds the function locally (``from time import sleep``) before
         the context is entered will bypass the mock.
+
+    Examples:
+        Synchronous — clock jumps instantly, no real wall-clock delay:
+
+        >>> import time, datetime
+        >>> with SleepFake() as sf:
+        ...     t0 = datetime.datetime.now()
+        ...     time.sleep(30)
+        ...     elapsed = (datetime.datetime.now() - t0).total_seconds()
+        >>> elapsed
+        30.0
+
+        Async — works with ``async with`` or the ``sleepfake`` pytest fixture:
+
+        >>> import asyncio, datetime
+        >>> async def main():
+        ...     async with SleepFake() as sf:
+        ...         t0 = datetime.datetime.now()
+        ...         await asyncio.sleep(10)
+        ...         return (datetime.datetime.now() - t0).total_seconds()
+        >>> asyncio.run(main())
+        10.0
     """
 
     def __init__(self, *, ignore: list[str] | None = None) -> None:
+        """Initialise a SleepFake instance.
+
+        Args:
+            ignore: Extra module prefixes that ``freezegun`` should leave on
+                real clocks.  Merged after :data:`DEFAULT_IGNORE`, so the
+                defaults are always active.
+
+        Examples:
+            Default — built-in ignores always apply:
+
+            >>> sf = SleepFake()
+
+            Keep an additional module on real clocks (e.g. a metrics library
+            that uses ``time.time`` internally):
+
+            >>> sf = SleepFake(ignore=["myapp.metrics"])
+        """
         resolved_ignore = [*DEFAULT_IGNORE, *(ignore or [])]
         self._ignore = resolved_ignore
         self.freeze_time = freezegun.freeze_time(
@@ -88,13 +127,29 @@ class SleepFake:
         return self
 
     async def __aenter__(self) -> Self:
+        """Async context manager entry — delegates to :meth:`__enter__`.
+
+        Returns:
+            Self: The context-managed instance.
+        """
         return self.__enter__()
 
     async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Async context manager exit — delegates to :meth:`aclose`.
+
+        Args:
+            exc_type: The exception class, or ``None`` if no exception was raised.
+            exc_val: The exception instance, or ``None``.
+            exc_tb: The traceback, or ``None``.
+        """
         await self.aclose()
 
     async def aclose(self) -> None:
-        """Async cleanup for the sleep processor and queue."""
+        """Cancel the background sleep processor and drain any pending futures.
+
+        Safe to call multiple times; subsequent calls are no-ops once the
+        processor has already been stopped.
+        """
         self.time_patch.stop()
         self.asyncio_patch.stop()
         self._stop_freeze()
@@ -116,7 +171,13 @@ class SleepFake:
         self.sleep_queue = None
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        """Restore the original time.sleep/asyncio.sleep function when exiting the context."""
+        """Restore ``time.sleep`` / ``asyncio.sleep`` and stop the frozen clock.
+
+        Args:
+            exc_type: The exception class, or ``None`` if no exception was raised.
+            exc_val: The exception instance, or ``None``.
+            exc_tb: The traceback, or ``None``.
+        """
         self.time_patch.stop()
         self.asyncio_patch.stop()
         self._stop_freeze()
@@ -136,7 +197,38 @@ class SleepFake:
         self.sleep_queue = None
 
     def mock_sleep(self, seconds: float) -> None:
-        """A mock sleep function that advances the frozen time instead of actually sleeping."""
+        """Advance the frozen clock by *seconds* instead of blocking.
+
+        This is the replacement injected for ``time.sleep``.
+
+        Args:
+            seconds: Number of seconds to advance the frozen clock.
+
+        Raises:
+            ValueError: If *seconds* is negative.
+            RuntimeError: If called outside a :class:`SleepFake` context.
+
+        Examples:
+            Called indirectly via the patched ``time.sleep``:
+
+            >>> import time, datetime
+            >>> with SleepFake() as sf:
+            ...     t0 = datetime.datetime.now()
+            ...     time.sleep(5)
+            ...     elapsed = (datetime.datetime.now() - t0).total_seconds()
+            >>> elapsed
+            5.0
+
+            Or called directly to advance the clock without touching
+            ``time.sleep``:
+
+            >>> with SleepFake() as sf:
+            ...     t0 = datetime.datetime.now()
+            ...     sf.mock_sleep(60)
+            ...     elapsed = (datetime.datetime.now() - t0).total_seconds()
+            >>> elapsed
+            60.0
+        """
         if seconds < 0:
             raise ValueError("sleep length must be non-negative")
         if self.frozen_factory is None:
@@ -144,11 +236,43 @@ class SleepFake:
         self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))
 
     async def amock_sleep(self, seconds: float) -> None:
-        """A mock sleep function that advances the frozen time instead of actually sleeping.
+        """Enqueue a sleep request and yield until the frozen clock reaches the deadline.
+
+        This is the replacement injected for ``asyncio.sleep``.  The background
+        :meth:`process_sleeps` task advances the frozen clock and resolves
+        futures in deadline order.
+
+        Args:
+            seconds: Number of seconds to wait (relative to the current frozen time).
 
         Raises:
-            ValueError: If seconds is negative.
-            _NotInitializedError: If the sleep queue is not initialized.
+            ValueError: If *seconds* is negative.
+            _NotInitializedError: If the sleep queue has not been initialised.
+
+        Examples:
+            Called indirectly via the patched ``asyncio.sleep`` (most common):
+
+            >>> import asyncio, datetime
+            >>> async def main():
+            ...     async with SleepFake() as sf:
+            ...         t0 = datetime.datetime.now()
+            ...         await asyncio.sleep(7)
+            ...         return (datetime.datetime.now() - t0).total_seconds()
+            >>> asyncio.run(main())
+            7.0
+
+            Multiple concurrent sleeps resolve in deadline order:
+
+            >>> async def race():
+            ...     results = []
+            ...     async with SleepFake():
+            ...         async def task(n):
+            ...             await asyncio.sleep(n)
+            ...             results.append(n)
+            ...         await asyncio.gather(task(3), task(1), task(2))
+            ...     return results
+            >>> asyncio.run(race())
+            [1, 2, 3]
         """
         if seconds < 0:
             raise ValueError("sleep length must be non-negative")
@@ -171,10 +295,16 @@ class SleepFake:
         await future
 
     async def process_sleeps(self) -> None:
-        """Process the priority sleep queue, advancing the time when necessary.
+        """Drain the priority queue and resolve futures in wake-deadline order.
+
+        Runs as a background :class:`asyncio.Task` for the lifetime of the
+        :class:`SleepFake` context.  For each item dequeued the frozen clock is
+        moved to the item's deadline (if it has not already passed) and the
+        associated future is resolved, unblocking the corresponding
+        ``asyncio.sleep`` caller.
 
         Raises:
-            _NotInitializedError: If the sleep queue is not initialized.
+            _NotInitializedError: If the sleep queue has not been initialised.
         """
         if self.sleep_queue is None:
             raise _NotInitializedError
