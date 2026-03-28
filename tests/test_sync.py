@@ -328,13 +328,19 @@ def test_cli_flag_async_test(pytester: pytest.Pytester) -> None:
     """``--sleepfake`` CLI flag must also patch async tests."""
     pytester.makepyfile("""
         import asyncio
+        import pytest
 
+        @pytest.mark.asyncio
         async def test_async_no_fixture():
             start = asyncio.get_running_loop().time()
             await asyncio.sleep(100)
             assert asyncio.get_running_loop().time() - start >= 100
     """)
-    result = pytester.runpytest_subprocess("-vvv", "--sleepfake")
+    pytester.makeconftest("""
+        import pytest
+        pytest_plugins = ["pytest_asyncio"]
+    """)
+    result = pytester.runpytest_subprocess("-vvv", "--sleepfake", "-p", "pytest_asyncio")
     result.assert_outcomes(passed=1)
 
 
@@ -346,11 +352,17 @@ def test_autouse_ini_async_test(pytester: pytest.Pytester) -> None:
     """)
     pytester.makepyfile("""
         import asyncio
+        import pytest
 
+        @pytest.mark.asyncio
         async def test_async_no_fixture():
             start = asyncio.get_running_loop().time()
             await asyncio.sleep(100)
             assert asyncio.get_running_loop().time() - start >= 100
     """)
-    result = pytester.runpytest_subprocess("-vvv")
+    pytester.makeconftest("""
+        import pytest
+        pytest_plugins = ["pytest_asyncio"]
+    """)
+    result = pytester.runpytest_subprocess("-vvv", "-p", "pytest_asyncio")
     result.assert_outcomes(passed=1)

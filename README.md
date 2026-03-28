@@ -52,9 +52,9 @@ async def test_async():
 
 ### As a pytest fixture
 
-Install once; the `sleepfake` and `asleepfake` fixtures are available in every test session automatically.
+Install once; the `sleepfake` fixture is available in every test session automatically.
 
-**`sleepfake`** (sync fixture):
+**`sleepfake`** — works for both sync *and* async tests:
 
 ```python
 import time
@@ -65,12 +65,10 @@ def test_retry_logic(sleepfake):
     assert time.time() - start >= 30
 ```
 
-**`asleepfake`** (async fixture — recommended for async tests; properly awaits the background processor task on teardown):
-
 ```python
 import asyncio
 
-async def test_polling(asleepfake):
+async def test_polling(sleepfake):
     start = asyncio.get_running_loop().time()
     await asyncio.gather(
         asyncio.sleep(1),
@@ -80,6 +78,8 @@ async def test_polling(asleepfake):
     # All three complete instantly; frozen clock sits at +5 s
     assert asyncio.get_running_loop().time() - start >= 5
 ```
+
+> **Deprecated:** The `asleepfake` async fixture is deprecated. Use `sleepfake` instead — it initialises the async sleep-processor lazily on the first `asyncio.sleep` call and works identically in async tests.
 
 ### As a marker
 
@@ -104,7 +104,7 @@ async def test_marked_async():
     assert asyncio.get_running_loop().time() - start >= 100
 ```
 
-> If a test requests the `sleepfake` or `asleepfake` fixture *and* carries the marker, the marker is a no-op — double-patching is prevented automatically.
+> If a test requests the `sleepfake` fixture *and* carries the marker, the marker is a no-op — double-patching is prevented automatically.
 
 ### Global autouse (every test, zero boilerplate)
 
@@ -139,7 +139,7 @@ async def test_async_no_decoration():
     assert asyncio.get_running_loop().time() - start >= 100
 ```
 
-Double-patching is prevented: if a test also requests the `sleepfake`/`asleepfake` fixture or carries `@pytest.mark.sleepfake`, the autouse layer is skipped for that test.
+Double-patching is prevented: if a test also requests the `sleepfake` fixture or carries `@pytest.mark.sleepfake`, the autouse layer is skipped for that test.
 
 **Option C — conftest.py autouse fixtures** (if you need finer control per directory):
 

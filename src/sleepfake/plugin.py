@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,17 +13,30 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def sleepfake() -> Generator[SleepFake, None, None]:
-    """Sync fixture — enters SleepFake via ``__enter__``/``__exit__``."""
+    """Pytest fixture — works for both sync and async tests.
+
+    Enters SleepFake via ``__enter__``/``__exit__``.  Inside an async test
+    the lazy ``_init_async_patch`` call initialises the priority-queue and
+    processor on the first ``asyncio.sleep`` call, so no async fixture is
+    needed.
+    """
     with SleepFake() as sf:
         yield sf
 
 
 @pytest.fixture
 async def asleepfake() -> AsyncGenerator[SleepFake, None]:
-    """Async fixture — enters SleepFake via ``__aenter__``/``__aexit__``.
+    """*Deprecated* — use the ``sleepfake`` fixture instead.
 
-    Properly awaits the background sleep-processor task on teardown.
+    ``sleepfake`` now works transparently in both sync and async tests.
+    ``asleepfake`` will be removed in a future release.
     """
+    warnings.warn(
+        "The 'asleepfake' fixture is deprecated and will be removed in a future release. "
+        "Use the 'sleepfake' fixture instead — it works for both sync and async tests.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     async with SleepFake() as sf:
         yield sf
 
@@ -72,9 +86,9 @@ class _AutouseSleepFakePlugin:
 
     Uses setup/teardown hooks (not autouse fixtures) so exactly one SleepFake
     context is entered per test, regardless of sync vs async, without touching
-    the fixture discovery machinery.  Tests that already use the
-    ``sleepfake``/``asleepfake`` fixture or ``@pytest.mark.sleepfake`` are
-    skipped to avoid double-patching.
+    the fixture discovery machinery.  Tests that already use the ``sleepfake``
+    fixture (or the deprecated ``asleepfake``) or ``@pytest.mark.sleepfake``
+    are skipped to avoid double-patching.
     """
 
     _ATTR = "_sleepfake_autouse_sf"
@@ -108,8 +122,8 @@ _MARKER_ATTR = "_sleepfake_marker_sf"
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Enter a SleepFake context for tests decorated with ``@pytest.mark.sleepfake``.
 
-    Skipped when the test already requests the ``sleepfake`` or ``asleepfake``
-    fixture to avoid double-patching.
+    Skipped when the test already requests the ``sleepfake`` fixture (or the
+    deprecated ``asleepfake``) to avoid double-patching.
     """
     if not list(item.iter_markers(name="sleepfake")):
         return

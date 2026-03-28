@@ -313,13 +313,13 @@ async def test_fixture_async_gather(sleepfake: SleepFake) -> None:  # noqa: ARG0
 
 
 # ---------------------------------------------------------------------------
-# Async fixture (asleepfake) — proper aclose() cleanup
+# sleepfake fixture in async tests (covers deprecated asleepfake use-cases)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_async_fixture_sleep(asleepfake: SleepFake) -> None:  # noqa: ARG001
-    """The async ``asleepfake`` fixture works for basic sleep."""
+async def test_async_fixture_sleep(sleepfake: SleepFake) -> None:  # noqa: ARG001
+    """The ``sleepfake`` fixture works for basic async sleep."""
     start = asyncio.get_running_loop().time()
     await asyncio.sleep(SLEEP_DURATION)
     end = asyncio.get_running_loop().time()
@@ -327,8 +327,8 @@ async def test_async_fixture_sleep(asleepfake: SleepFake) -> None:  # noqa: ARG0
 
 
 @pytest.mark.asyncio
-async def test_async_fixture_gather(asleepfake: SleepFake) -> None:  # noqa: ARG001
-    """Concurrent gathers work through the async fixture."""
+async def test_async_fixture_gather(sleepfake: SleepFake) -> None:  # noqa: ARG001
+    """Concurrent gathers work through the ``sleepfake`` fixture in an async test."""
     start = asyncio.get_running_loop().time()
     await asyncio.gather(
         asyncio.sleep(SLEEP_DURATION),
@@ -340,9 +340,9 @@ async def test_async_fixture_gather(asleepfake: SleepFake) -> None:  # noqa: ARG
 
 
 @pytest.mark.asyncio
-async def test_async_fixture_cleanup(asleepfake: SleepFake) -> None:
-    """After the async fixture yields, processor and queue are cleaned up."""
+async def test_async_fixture_cleanup(sleepfake: SleepFake) -> None:
+    """While the fixture is active the processor and queue are initialised."""
     await asyncio.sleep(1)
-    # While inside the fixture, processor should be running.
-    assert asleepfake.sleep_processor is not None
-    assert asleepfake.sleep_queue is not None
+    # Lazy init on first amock_sleep — processor must be running now.
+    assert sleepfake.sleep_processor is not None
+    assert sleepfake.sleep_queue is not None
