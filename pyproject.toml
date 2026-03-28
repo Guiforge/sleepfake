@@ -1,6 +1,6 @@
 [project]
 name = "sleepfake"
-version = "1.2.0"
+version = "1.2.1"
 description = "Fake the time.sleep/asyncio.sleep function during tests."
 authors = [
     { name = "Guillaume Pouyat", email = "guillaume.pouyat@protonmail.com" },
