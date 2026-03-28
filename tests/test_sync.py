@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import time
 
 import pytest
@@ -77,3 +78,35 @@ def test_sync_reentrant_context():
         with SleepFake():
             time.sleep(SLEEP_DURATION)
         assert time.time() - real_start < 1
+
+
+# ---------------------------------------------------------------------------
+# asyncio.timeout integration inside a sync context manager (Python 3.11+)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_timeout_raises_when_sleep_exceeds_deadline():
+    """asyncio.timeout should fire when SleepFake is entered via sync __enter__."""
+    if sys.version_info < (3, 11):
+        pytest.skip("asyncio.timeout requires Python 3.11+")
+
+    timed_out = False
+    with SleepFake():
+        try:
+            async with asyncio.timeout(2):  # type: ignore[attr-defined]
+                await asyncio.sleep(10)
+        except TimeoutError:
+            timed_out = True
+    assert timed_out
+
+
+@pytest.mark.asyncio
+async def test_sync_timeout_not_raised_when_sleep_within_deadline():
+    """No TimeoutError when asyncio.sleep finishes before the asyncio.timeout deadline."""
+    if sys.version_info < (3, 11):
+        pytest.skip("asyncio.timeout requires Python 3.11+")
+
+    with SleepFake():
+        async with asyncio.timeout(10):  # type: ignore[attr-defined]
+            await asyncio.sleep(2)  # completes well within the 10 s deadline

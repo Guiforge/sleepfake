@@ -108,6 +108,38 @@ async def test_async_gather_mixed_durations_time_advances_correctly():
 
 
 # ---------------------------------------------------------------------------
+# asyncio.timeout integration (Python 3.11+)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_timeout_raises_when_sleep_exceeds_deadline():
+    """asyncio.timeout should fire even when SleepFake is active."""
+    if sys.version_info < (3, 11):
+        pytest.skip("asyncio.timeout requires Python 3.11+")
+
+    timed_out = False
+    with SleepFake():
+        try:
+            async with asyncio.timeout(2):  # type: ignore[attr-defined]
+                await asyncio.sleep(10)
+        except TimeoutError:
+            timed_out = True
+    assert timed_out
+
+
+@pytest.mark.asyncio
+async def test_async_timeout_not_raised_when_sleep_within_deadline():
+    """No TimeoutError when sleep finishes before the asyncio.timeout deadline."""
+    if sys.version_info < (3, 11):
+        pytest.skip("asyncio.timeout requires Python 3.11+")
+
+    with SleepFake():
+        async with asyncio.timeout(10):  # type: ignore[attr-defined]
+            await asyncio.sleep(2)  # completes well within the 10 s deadline
+
+
+# ---------------------------------------------------------------------------
 # Bug 1: cancelled future must not crash process_sleeps
 # ---------------------------------------------------------------------------
 

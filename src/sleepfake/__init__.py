@@ -138,6 +138,7 @@ class SleepFake:
         if self.sleep_queue is None:
             raise _NotInitializedError
 
+        loop = asyncio.get_running_loop()
         while True:
             try:
                 sleep_time, _seq, future = await self.sleep_queue.get()
@@ -153,5 +154,11 @@ class SleepFake:
                     and self.frozen_factory.time_to_freeze < sleep_time
                 ):
                     self.frozen_factory.move_to(sleep_time)
+                # Yield exactly one event-loop iteration so that any call_at
+                # callbacks whose deadlines have now passed (e.g. asyncio.timeout)
+                # can fire and cancel pending futures before we resolve them.
+                tick: asyncio.Future[None] = loop.create_future()
+                loop.call_soon(tick.set_result, None)
+                await tick
                 if not future.cancelled():
                     future.set_result(None)
