@@ -308,10 +308,5 @@ Code that binds the function locally **before** the context is entered (for exam
 
 PRs and issues welcome!
 
----
-
-Made with ❤️ and a dash of impatience.
-
----
 
 > **Note:** SleepFake uses [freezegun](https://github.com/spulec/freezegun) under the hood.
