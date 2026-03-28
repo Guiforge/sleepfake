@@ -1,9 +1,12 @@
 <!-- Shield Badges -->
 <p align="center">
-  <img src="./logo.svg" alt="SleepFake Logo" width="120"/>
+  <img src="./logo.png" alt="SleepFake Logo" width="160"/>
 </p>
 <p align="center">
+  <a href="https://github.com/guipouy/sleepfake"><img src="https://img.shields.io/badge/github-sleepfake-181717?logo=github" alt="GitHub"></a>
   <a href="https://pypi.org/project/sleepfake/"><img src="https://img.shields.io/pypi/v/sleepfake.svg?color=blue" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/sleepfake/"><img src="https://img.shields.io/pypi/pyversions/sleepfake.svg" alt="Python versions"></a>
+  <img src="https://img.shields.io/pypi/l/sleepfake.svg" alt="License: MIT"/>
   <a href="https://github.com/spulec/freezegun"><img src="https://img.shields.io/badge/dependency-freezegun-blue" alt="freezegun"></a>
   <img src="https://img.shields.io/badge/pytest%20plugin-stable-green" alt="pytest plugin stable"/>
 </p>
@@ -56,6 +59,8 @@ async def test_polling():
     await asyncio.sleep(10)  # returns instantly
     assert asyncio.get_running_loop().time() - start >= 10
 ```
+
+> **`pytest-asyncio` users:** add `asyncio_mode = "auto"` to `pyproject.toml` (or mark each test with `@pytest.mark.asyncio`) so pytest collects async tests correctly.
 
 ✅ **Result:** your suite keeps time-based correctness, minus the wall-clock pain.
 
@@ -280,6 +285,7 @@ async def test_timeout_fires():
 | Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_autouse = true` | `[tool.pytest.ini_options]\nsleepfake_autouse = true` | Same as `--sleepfake`, but persisted in config. |
 | Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_ignore` | `sleepfake_ignore = ["my.module"]` | Add module prefixes to ignore for all pytest-managed SleepFake usage. |
 | `conftest.py` | `pytest_sleepfake_ignore` | `pytest_sleepfake_ignore = ["my.module"]` | Override ignore prefixes for a test subtree (directory-scoped). |
+| Pytest marker | `@pytest.mark.no_sleepfake` | `@pytest.mark.no_sleepfake` | Opt a single test out of global autouse patching. Has no effect if the test explicitly requests the `sleepfake` fixture. |
 
 Notes:
 
@@ -321,7 +327,19 @@ def hard_to_patch():
 
 ## 🤝 Contributing
 
-PRs and issues welcome!
+PRs and issues welcome! Here's how to get started:
 
+```bash
+# Install dependencies and run the test suite
+uv run pytest --force-sugar -vvv
+
+# Lint (ruff + mypy) then test
+make test-all
+
+# Run against all supported Python versions (3.10–3.15)
+make test-all-python
+```
+
+Please run `make test-all` before submitting a PR.
 
 > **Note:** SleepFake uses [freezegun](https://github.com/spulec/freezegun) under the hood.
