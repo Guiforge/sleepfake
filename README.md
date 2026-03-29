@@ -15,12 +15,6 @@
 
 Ever wish your tests could skip the waiting but keep correct time behavior? **SleepFake** patches `time.sleep` and `asyncio.sleep` so tests return instantly while frozen time moves forward exactly as requested.
 
-## 🚀 Why teams adopt SleepFake fast
-
-- **Zero waiting** in sync and async tests
-- **Minimal setup** (one install + one config toggle)
-- **Realistic behavior** for timeouts, task groups, and ordering
-
 ## 📦 Install (30 seconds)
 
 ```bash
@@ -66,12 +60,12 @@ async def test_polling():
 
 ## 🧭 Choose your usage style
 
-| Use case | Best option | Boilerplate |
-|---|---|---|
-| Apply everywhere (most teams) | Global autouse (`sleepfake_autouse = true` or `--sleepfake`) | Lowest |
-| Per-test explicit control | `sleepfake` fixture | Low |
-| Decoration-style usage | `@pytest.mark.sleepfake` | Low |
-| Non-pytest scripts / direct control | `SleepFake` context manager | Medium |
+| Use case                            | Best option                                                  | Boilerplate |
+| ----------------------------------- | ------------------------------------------------------------ | ----------- |
+| Apply everywhere (most teams)       | Global autouse (`sleepfake_autouse = true` or `--sleepfake`) | Lowest      |
+| Per-test explicit control           | `sleepfake` fixture                                          | Low         |
+| Decoration-style usage              | `@pytest.mark.sleepfake`                                     | Low         |
+| Non-pytest scripts / direct control | `SleepFake` context manager                                  | Medium      |
 
 ## 📚 Full details (expand as needed)
 
@@ -277,15 +271,15 @@ async def test_timeout_fires():
 <details>
 <summary><strong>Options reference (API, CLI, config)</strong></summary>
 
-| Where | Option | Example | Purpose |
-|---|---|---|---|
-| Python API (`SleepFake`) | `ignore: list[str] \| None` | `SleepFake(ignore=["my.module"])` | Add module prefixes freezegun should ignore while freezing time. |
-| Pytest CLI | `--sleepfake` | `pytest --sleepfake` | Enable SleepFake for every test in the session. |
-| Pytest CLI | `--sleepfake-ignore MODULE` | `pytest --sleepfake-ignore my.module` | Add a module prefix to ignore (repeatable; merged with `sleepfake_ignore`). |
-| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_autouse = true` | `[tool.pytest.ini_options]\nsleepfake_autouse = true` | Same as `--sleepfake`, but persisted in config. |
-| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_ignore` | `sleepfake_ignore = ["my.module"]` | Add module prefixes to ignore for all pytest-managed SleepFake usage. |
-| `conftest.py` | `pytest_sleepfake_ignore` | `pytest_sleepfake_ignore = ["my.module"]` | Override ignore prefixes for a test subtree (directory-scoped). |
-| Pytest marker | `@pytest.mark.no_sleepfake` | `@pytest.mark.no_sleepfake` | Opt a single test out of global autouse patching. Has no effect if the test explicitly requests the `sleepfake` fixture. |
+| Where                                           | Option                      | Example                                               | Purpose                                                                                                                  |
+| ----------------------------------------------- | --------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Python API (`SleepFake`)                        | `ignore: list[str] \| None` | `SleepFake(ignore=["my.module"])`                     | Add module prefixes freezegun should ignore while freezing time.                                                         |
+| Pytest CLI                                      | `--sleepfake`               | `pytest --sleepfake`                                  | Enable SleepFake for every test in the session.                                                                          |
+| Pytest CLI                                      | `--sleepfake-ignore MODULE` | `pytest --sleepfake-ignore my.module`                 | Add a module prefix to ignore (repeatable; merged with `sleepfake_ignore`).                                              |
+| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_autouse = true`  | `[tool.pytest.ini_options]\nsleepfake_autouse = true` | Same as `--sleepfake`, but persisted in config.                                                                          |
+| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_ignore`          | `sleepfake_ignore = ["my.module"]`                    | Add module prefixes to ignore for all pytest-managed SleepFake usage.                                                    |
+| `conftest.py`                                   | `pytest_sleepfake_ignore`   | `pytest_sleepfake_ignore = ["my.module"]`             | Override ignore prefixes for a test subtree (directory-scoped).                                                          |
+| Pytest marker                                   | `@pytest.mark.no_sleepfake` | `@pytest.mark.no_sleepfake`                           | Opt a single test out of global autouse patching. Has no effect if the test explicitly requests the `sleepfake` fixture. |
 
 Notes:
 
@@ -316,14 +310,14 @@ def hard_to_patch():
 
 ## 🧪 How it works
 
-| Aspect | Detail |
-|---|---|
-| **Sync sleep** | `frozen_factory.tick(delta)` advances frozen time immediately |
-| **Async sleep** | `(deadline, seq, future)` goes into an `asyncio.PriorityQueue`; a background task resolves futures in deadline order |
-| **Broad patching** | On context entry, `sys.modules` is scanned for module-level aliases of the originals (e.g. `from time import sleep`); all matched attributes are replaced and restored on exit |
-| **Timeout safety** | After advancing time, the processor yields one event-loop turn so timeout callbacks can fire before futures resolve |
-| **Cancellation** | Cancelled futures are skipped; the processor keeps running |
-| **pytest durations** | `freeze_time(..., ignore=["_pytest.timing", ...])` avoids breaking pytest internal wall-clock timing |
+| Aspect               | Detail                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Sync sleep**       | `frozen_factory.tick(delta)` advances frozen time immediately                                                                                                                  |
+| **Async sleep**      | `(deadline, seq, future)` goes into an `asyncio.PriorityQueue`; a background task resolves futures in deadline order                                                           |
+| **Broad patching**   | On context entry, `sys.modules` is scanned for module-level aliases of the originals (e.g. `from time import sleep`); all matched attributes are replaced and restored on exit |
+| **Timeout safety**   | After advancing time, the processor yields one event-loop turn so timeout callbacks can fire before futures resolve                                                            |
+| **Cancellation**     | Cancelled futures are skipped; the processor keeps running                                                                                                                     |
+| **pytest durations** | `freeze_time(..., ignore=["_pytest.timing", ...])` avoids breaking pytest internal wall-clock timing                                                                           |
 
 ## 🤝 Contributing
 
