@@ -1,0 +1,24 @@
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "mixed-line-ending", args = ["--fix=lf"] },
+    { id = "check-added-large-files" },
+    { id = "check-case-conflict" },
+    { id = "check-merge-conflict" },
+    { id = "check-toml" },
+    { id = "check-yaml" },
+    { id = "detect-private-key" },
+]
+
+# ruff and ty run from the project venv so their versions come from uv.lock.
+[[repos]]
+repo = "local"
+hooks = [
+    { id = "ruff-check", name = "ruff check", entry = "uv run --frozen ruff check --fix --exit-non-zero-on-fix", language = "system", types_or = ["python", "pyi"] },
+    { id = "ruff-format", name = "ruff format", entry = "uv run --frozen ruff format", language = "system", types_or = ["python", "pyi", "markdown"] },
+    { id = "ty", name = "ty check", entry = "uv run --frozen ty check", language = "system", types_or = ["python", "pyi"], pass_filenames = false },
+]
