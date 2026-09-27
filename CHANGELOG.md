@@ -1,6 +1,19 @@
 # Changelog
 
-## 1.3.0
+## 2.0.0
+
+### Breaking changes
+
+- **Loop timers now run on the fake clock (autojump).** Inside SleepFake, `asyncio.wait_for`, `asyncio.timeout` and `loop.call_later` fire once the event loop has been idle for 20 ms of real time, instead of waiting in real time (or hanging). Real I/O slower than that under a timeout now times out.
+  *Migration:* raise the threshold (`sleepfake_autojump_threshold = "0.5"` in your pytest config, or `SleepFake(autojump_threshold=0.5)`), or restore the 1.x behaviour with `"inf"` / `math.inf`.
+- **`time.sleep` / `asyncio.sleep` are no longer `MagicMock`s** while patched. `time.sleep.assert_called_once_with(5)`, `.call_count`, `.mock_calls`... now raise `AttributeError`.
+  *Migration:* assert on the clock instead (`time.time()` / `datetime.now()` advanced by the expected amount), or spy inside the context: `with patch("time.sleep", wraps=time.sleep) as spy: ...` then `spy.assert_called_once_with(5)`.
+- **Removed attributes:** `SleepFake.sleep_queue`, `SleepFake.sleep_processor`, `SleepFake.process_sleeps`. There is no background task any more.
+  *Migration:* none needed for normal use; `aclose()` and `async with` still clean up.
+- **Plugin entry point renamed** from `pytest11` to `sleepfake`.
+  *Migration:* `-p no:pytest11` becomes `-p no:sleepfake`.
+- **Negative `asyncio.sleep` returns immediately** (like the real function) instead of raising `ValueError`. `time.sleep(-1)` still raises.
+- **Marker / autouse no longer freeze broader-scope fixtures.** Session-, module- and class-scoped fixtures are set up and torn down on real time; only function-scoped fixtures and the test run on the fake clock.
 
 ### Added
 
@@ -22,12 +35,5 @@
 - Concurrent `time.sleep` calls from several threads lost time on free-threaded builds.
 - With `@pytest.mark.sleepfake` or autouse: combining with an explicit `sleepfake` fixture left `time.sleep` patched for the rest of the session; function-fixture teardown ran with real sleeps; session/module fixtures saw the frozen clock.
 - `pytest_sleepfake_ignore` set to a `set` (or any non-list iterable) was ignored; other invalid types are now a `pytest.UsageError`.
-
-### Changed
-
-- The pytest plugin entry point is named `sleepfake` (was `pytest11`): disable it with `-p no:sleepfake`.
-- `asyncio.sleep` with a negative delay returns immediately, like the real function, instead of raising `ValueError`.
-- `time.sleep` / `asyncio.sleep` are replaced by plain functions instead of `MagicMock`s (no unbounded `mock_calls`).
-- Internals removed: `SleepFake.sleep_queue`, `SleepFake.sleep_processor`, `SleepFake.process_sleeps`.
 
 For earlier versions, see the [GitHub releases](https://github.com/Guiforge/sleepfake/releases).
