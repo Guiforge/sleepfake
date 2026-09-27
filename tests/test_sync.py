@@ -1,4 +1,6 @@
 import asyncio
+import datetime
+import importlib.metadata
 import re
 import sys
 import time
@@ -656,3 +658,20 @@ def test_broad_patch_does_not_patch_local_variable() -> None:
         assert local_sleep is original_sleep
         # But the global time.sleep has been patched inside the context
         assert time.sleep is not original_sleep
+
+
+def test_reused_instance_starts_from_current_time() -> None:
+    """Re-entering the same SleepFake freezes at the current time, not construction time."""
+    sf = SleepFake()
+    with sf:
+        pass
+    time.sleep(0.05)  # real sleep: SleepFake is not active here
+    before_second_entry = datetime.datetime.now(tz=datetime.timezone.utc)
+    with sf:
+        assert datetime.datetime.now(tz=datetime.timezone.utc) >= before_second_entry
+
+
+def test_entry_point_is_named_sleepfake() -> None:
+    """The pytest11 entry point is named ``sleepfake`` so ``-p no:sleepfake`` works."""
+    names = {ep.name for ep in importlib.metadata.entry_points(group="pytest11")}
+    assert "sleepfake" in names

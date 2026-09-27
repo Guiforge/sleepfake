@@ -9,7 +9,7 @@ import sys
 import time as _time_module
 import types
 import warnings
-from typing import Final, cast
+from typing import Final, TypeVar, cast
 from unittest.mock import patch
 
 import freezegun
@@ -20,6 +20,8 @@ else:  # pragma: no cover
     from typing_extensions import Self
 
 __all__ = ["DEFAULT_IGNORE", "SleepFake"]
+
+_T = TypeVar("_T")
 
 
 class _NotInitializedError(Exception):
@@ -41,6 +43,11 @@ DEFAULT_IGNORE: Final[list[str]] = ["_pytest.timing", "pytest_timeout"]
 # Used by the broad-patch mechanism to locate module-level aliases.
 _ORIG_TIME_SLEEP: Final = _time_module.sleep
 _ORIG_ASYNCIO_SLEEP: Final = asyncio.sleep
+
+
+def _set_result_unless_done(fut: asyncio.Future[None]) -> None:
+    if not fut.done():
+        fut.set_result(None)
 
 
 class SleepFake:
@@ -161,6 +168,10 @@ class SleepFake:
 
     def _start_freeze(self) -> None:
         if not self._freeze_started:
+            # Re-create on every entry so a reused instance freezes at the current time.
+            self.freeze_time = freezegun.freeze_time(
+                datetime.datetime.now(tz=datetime.timezone.utc), ignore=self._ignore
+            )
             # Without tick/auto_tick_seconds, freeze_time always yields a FrozenDateTimeFactory.
             self.frozen_factory = cast(
                 "freezegun.api.FrozenDateTimeFactory", self.freeze_time.start()
@@ -211,32 +222,35 @@ class SleepFake:
         """
         await self.aclose()
 
+    def _teardown(self) -> asyncio.Task[None] | None:
+        """Undo every patch, cancel pending sleeps and return the processor to await, if any."""
+        self._unpatch_module_aliases()
+        self.time_patch.stop()
+        self.asyncio_patch.stop()
+        self._stop_freeze()
+        processor, self.sleep_processor = self.sleep_processor, None
+        if processor is not None and not processor.done():
+            processor.cancel()
+        else:
+            processor = None
+        # Cancel any futures still in the queue so coroutines awaiting them are not leaked.
+        if self.sleep_queue is not None:
+            while not self.sleep_queue.empty():
+                _, _, fut = self.sleep_queue.get_nowait()
+                fut.cancel()
+        self.sleep_queue = None
+        return processor
+
     async def aclose(self) -> None:
         """Cancel the background sleep processor and drain any pending futures.
 
         Safe to call multiple times; subsequent calls are no-ops once the
         processor has already been stopped.
         """
-        self._unpatch_module_aliases()
-        self.time_patch.stop()
-        self.asyncio_patch.stop()
-        self._stop_freeze()
-        if self.sleep_processor:
-            if not self.sleep_processor.done():
-                self.sleep_processor.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self.sleep_processor
-            self.sleep_processor = None
-        # Cancel any futures still in the queue so coroutines awaiting them are not leaked.
-        if self.sleep_queue is not None:
-            while not self.sleep_queue.empty():
-                try:
-                    _, _, fut = self.sleep_queue.get_nowait()
-                    if not fut.done():
-                        fut.cancel()
-                except asyncio.QueueEmpty:  # noqa: PERF203  # pragma: no cover
-                    break
-        self.sleep_queue = None
+        processor = self._teardown()
+        if processor is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await processor
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         """Restore ``time.sleep`` / ``asyncio.sleep`` and stop the frozen clock.
@@ -246,24 +260,7 @@ class SleepFake:
             exc_val: The exception instance, or ``None``.
             exc_tb: The traceback, or ``None``.
         """
-        self._unpatch_module_aliases()
-        self.time_patch.stop()
-        self.asyncio_patch.stop()
-        self._stop_freeze()
-        if self.sleep_processor:
-            if not self.sleep_processor.done():
-                self.sleep_processor.cancel()
-            self.sleep_processor = None
-        # Cancel any futures still in the queue so coroutines awaiting them are not leaked.
-        if self.sleep_queue is not None:
-            while not self.sleep_queue.empty():
-                try:
-                    _, _, fut = self.sleep_queue.get_nowait()
-                    if not fut.done():
-                        fut.cancel()
-                except asyncio.QueueEmpty:  # noqa: PERF203  # pragma: no cover
-                    break
-        self.sleep_queue = None
+        self._teardown()
 
     def mock_sleep(self, seconds: float) -> None:
         """Advance the frozen clock by *seconds* instead of blocking.
@@ -306,7 +303,7 @@ class SleepFake:
             raise RuntimeError(msg)
         self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))
 
-    async def amock_sleep(self, seconds: float) -> None:
+    async def amock_sleep(self, seconds: float, result: _T | None = None) -> _T | None:
         """Enqueue a sleep request and yield until the frozen clock reaches the deadline.
 
         This is the replacement injected for ``asyncio.sleep``.  The background
@@ -315,9 +312,13 @@ class SleepFake:
 
         Args:
             seconds: Number of seconds to wait (relative to the current frozen time).
+                Negative values behave like ``0``, as with the real ``asyncio.sleep``.
+            result: Value returned once the sleep completes.
+
+        Returns:
+            *result*, like the real ``asyncio.sleep``.
 
         Raises:
-            ValueError: If *seconds* is negative.
             _NotInitializedError: If the sleep queue has not been initialised.
 
         Examples:
@@ -345,9 +346,6 @@ class SleepFake:
             >>> asyncio.run(race())
             [1, 2, 3]
         """
-        if seconds < 0:
-            msg = "sleep length must be non-negative"
-            raise ValueError(msg)
         # lazy initialize the sleep queue and processor (useful for async tests fixture)
         if self.sleep_processor is None:
             await self._init_async_patch()
@@ -365,6 +363,7 @@ class SleepFake:
         self._seq += 1
         await self.sleep_queue.put((deadline, self._seq, future))
         await future
+        return result
 
     async def process_sleeps(self) -> None:
         """Drain the priority queue and resolve futures in wake-deadline order.
@@ -405,7 +404,12 @@ class SleepFake:
                 # NOTE: cannot use ``await asyncio.sleep(0)`` here — asyncio.sleep is
                 # patched and calling it would re-enter amock_sleep causing recursion.
                 tick: asyncio.Future[None] = loop.create_future()
-                loop.call_soon(tick.set_result, None)
-                await tick
+                loop.call_soon(_set_result_unless_done, tick)
+                try:
+                    await tick
+                except asyncio.CancelledError:
+                    # The context is exiting: release the sleeper we already dequeued.
+                    future.cancel()
+                    raise
                 if not future.cancelled():
                     future.set_result(None)

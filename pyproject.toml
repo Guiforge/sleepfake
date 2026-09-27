@@ -77,7 +77,7 @@ suppress-none-returning = true
 max-complexity = 10
 
 [project.entry-points.pytest11]
-pytest11 = "sleepfake.plugin"
+sleepfake = "sleepfake.plugin"
 
 
 [tool.pytest.ini_options]

@@ -355,10 +355,13 @@ async def test_async_fixture_cleanup(sleepfake: SleepFake) -> None:
 
 
 @pytest.mark.asyncio
-async def test_amock_sleep_negative_raises() -> None:
-    """amock_sleep raises ValueError for negative sleep duration."""
-    with SleepFake(), pytest.raises(ValueError, match="non-negative"):
+async def test_amock_sleep_negative_behaves_like_zero() -> None:
+    """Like the real asyncio.sleep, a negative delay returns immediately without raising."""
+    async with SleepFake():
+        loop = asyncio.get_running_loop()
+        start = loop.time()
         await asyncio.sleep(-1)
+        assert loop.time() == start
 
 
 @pytest.mark.asyncio
@@ -446,3 +449,38 @@ async def test_broad_patch_asyncio_sleep_module_alias() -> None:
         assert fake_mod.sleep is original_sleep  # type: ignore[attr-defined]
     finally:
         sys.modules.pop("_sleepfake_test_broad_async", None)
+
+
+@pytest.mark.asyncio
+async def test_amock_sleep_returns_result() -> None:
+    """``asyncio.sleep(delay, result)`` returns *result*, like the real function."""
+    async with SleepFake():
+        assert await asyncio.sleep(1, "done") == "done"
+        assert await asyncio.sleep(1, result=42) == 42
+        assert await asyncio.sleep(1) is None
+
+
+@pytest.mark.asyncio
+async def test_exit_cancels_in_flight_future() -> None:
+    """A sleep already dequeued by the processor is cancelled on exit, not leaked forever."""
+    loop = asyncio.get_running_loop()
+
+    async def real_yield() -> None:
+        fut: asyncio.Future[None] = loop.create_future()
+        loop.call_soon(fut.set_result, None)
+        await fut
+
+    sf = SleepFake()
+    sf.__enter__()
+    task = asyncio.create_task(asyncio.sleep(5))
+    for _ in range(10):
+        await real_yield()
+        if sf.sleep_queue is not None and sf.sleep_queue.empty():
+            break
+    # The processor has dequeued the sleep and is mid-tick; exit now.
+    assert not task.done()
+    sf.__exit__(None, None, None)
+    for _ in range(5):
+        await real_yield()
+    assert task.done()
+    assert task.cancelled() or task.exception() is None
