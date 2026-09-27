@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from sleepfake import SleepFake
+from sleepfake import SleepFake, core
 
 SLEEP_DURATION = 5
 
@@ -217,11 +217,10 @@ async def test_freeze_not_started_before_aenter():
 
 @pytest.mark.asyncio
 async def test_async_cleanup_after_aenter():
-    """After async with, sleep_processor and sleep_queue should be None."""
+    """After async with, no loop driver is left behind."""
     async with SleepFake() as sf:
         await asyncio.sleep(1)
-    assert sf.sleep_processor is None
-    assert sf.sleep_queue is None
+    assert sf._drivers == {}  # noqa: SLF001
     assert not sf._freeze_started  # noqa: SLF001
 
 
@@ -345,11 +344,9 @@ async def test_async_fixture_gather(sleepfake: SleepFake) -> None:  # noqa: ARG0
 
 @pytest.mark.asyncio
 async def test_async_fixture_cleanup(sleepfake: SleepFake) -> None:
-    """While the fixture is active the processor and queue are initialised."""
+    """While the fixture is active, the running loop gets a driver on first use."""
     await asyncio.sleep(1)
-    # Lazy init on first amock_sleep — processor must be running now.
-    assert sleepfake.sleep_processor is not None
-    assert sleepfake.sleep_queue is not None
+    assert asyncio.get_running_loop() in sleepfake._drivers  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------
@@ -369,64 +366,12 @@ async def test_amock_sleep_negative_behaves_like_zero() -> None:
 
 @pytest.mark.asyncio
 async def test_exit_drains_pending_queue_futures() -> None:
-    """Sync __exit__ cancels futures still pending in the sleep queue."""
-    import datetime as dt  # noqa: PLC0415
-
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future[None] = loop.create_future()
-    deadline = dt.datetime.now(tz=dt.timezone.utc).replace(tzinfo=None) + dt.timedelta(seconds=100)
-
-    with SleepFake() as sf:
-        sf.sleep_queue = asyncio.PriorityQueue()
-        sf.sleep_queue.put_nowait((deadline, 1, fut))
-
-    assert fut.cancelled()
-
-
-@pytest.mark.asyncio
-async def test_process_sleeps_skips_cancelled_future() -> None:
-    """process_sleeps gracefully skips futures that were cancelled after queuing."""
-    import datetime as dt  # noqa: PLC0415
-
-    async with SleepFake() as sf:
-        await asyncio.sleep(0)  # trigger lazy init of queue + processor
-        assert sf.sleep_queue is not None
-
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[None] = loop.create_future()
-        deadline = dt.datetime.now(tz=dt.timezone.utc).replace(tzinfo=None)
-        sf._seq += 1  # noqa: SLF001
-        sf.sleep_queue.put_nowait((deadline, sf._seq, fut))  # noqa: SLF001
-        fut.cancel()
-
-        # Yield so process_sleeps can dequeue and skip the cancelled future.
-        tick: asyncio.Future[None] = loop.create_future()
-        loop.call_soon(tick.set_result, None)
-        await tick
-
-
-@pytest.mark.asyncio
-async def test_amock_sleep_not_initialized_raises() -> None:
-    """amock_sleep raises _NotInitializedError when processor is set but queue is None."""
-    from sleepfake.core import _NotInitializedError  # noqa: PLC0415
-
-    async with SleepFake() as sf:
-        await asyncio.sleep(0)  # init processor
-        real_queue = sf.sleep_queue
-        sf.sleep_queue = None  # corrupt state
-        with pytest.raises(_NotInitializedError):
-            await sf.amock_sleep(1)
-        sf.sleep_queue = real_queue  # restore for clean aclose
-
-
-@pytest.mark.asyncio
-async def test_process_sleeps_raises_when_queue_is_none() -> None:
-    """process_sleeps raises _NotInitializedError when sleep_queue is None."""
-    from sleepfake.core import _NotInitializedError  # noqa: PLC0415
-
-    sf = SleepFake()
-    with pytest.raises(_NotInitializedError):
-        await sf.process_sleeps()
+    """Sync __exit__ cancels sleeps still pending."""
+    with SleepFake():
+        task = asyncio.create_task(asyncio.sleep(100))
+        await _real_yield()
+    await _real_yield()
+    assert task.cancelled()
 
 
 # ---------------------------------------------------------------------------
@@ -467,26 +412,22 @@ async def test_amock_sleep_returns_result() -> None:
 async def test_exit_cancels_in_flight_future() -> None:
     """A sleep already dequeued by the processor is cancelled on exit, not leaked forever."""
     loop = asyncio.get_running_loop()
-
-    async def real_yield() -> None:
-        fut: asyncio.Future[None] = loop.create_future()
-        loop.call_soon(fut.set_result, None)
-        await fut
-
     sf = SleepFake()
     sf.__enter__()
     task = asyncio.create_task(asyncio.sleep(5))
-    for _ in range(10):
-        await real_yield()
-        if sf.sleep_queue is not None and sf.sleep_queue.empty():
+    # This test keeps the loop busy, so the driver only pops the sleep after its idle-wait
+    # cap, then holds it unresolved for up to that cap again.
+    for _ in range(3 * core._MAX_IDLE_YIELDS):  # noqa: SLF001
+        await _real_yield()
+        if sf._drivers[loop]._waking is not None:  # noqa: SLF001
             break
-    # The processor has dequeued the sleep and is mid-tick; exit now.
+    else:
+        pytest.fail("the driver never held the sleep in flight")
     assert not task.done()
     sf.__exit__(None, None, None)
     for _ in range(5):
-        await real_yield()
-    assert task.done()
-    assert task.cancelled() or task.exception() is None
+        await _real_yield()
+    assert task.cancelled()
 
 
 @pytest.mark.filterwarnings("ignore:The 'asleepfake' fixture is deprecated:DeprecationWarning")
@@ -496,7 +437,7 @@ async def test_deprecated_asleepfake_fixture_still_works(asleepfake: SleepFake) 
     start = loop.time()
     await asyncio.sleep(10)
     assert loop.time() - start == 10
-    assert asleepfake.sleep_processor is not None
+    assert loop in asleepfake._drivers  # noqa: SLF001
 
 
 def test_asleepfake_fixture_emits_deprecation_warning(pytester: pytest.Pytester) -> None:
@@ -511,6 +452,14 @@ def test_asleepfake_fixture_emits_deprecation_warning(pytester: pytest.Pytester)
     result = pytester.runpytest_subprocess("-W", "error::DeprecationWarning")
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["*asleepfake*deprecated*"])
+
+
+async def _real_yield() -> None:
+    """One event-loop turn without going through the patched ``asyncio.sleep``."""
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[None] = loop.create_future()
+    loop.call_soon(fut.set_result, None)
+    await fut
 
 
 def _elapsed(t0: datetime.datetime) -> float:
@@ -627,7 +576,7 @@ async def test_sleep_after_timeout_keeps_working() -> None:
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.sleep(10), timeout=2)
         await asyncio.sleep(1)
-        assert _elapsed(t0) == 11
+        assert _elapsed(t0) == pytest.approx(3, abs=1e-5)
 
 
 async def test_busy_task_does_not_stall_the_clock(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -652,4 +601,4 @@ async def test_aclose_twice_is_a_no_op() -> None:
     async with sf:
         await asyncio.sleep(1)
     await sf.aclose()
-    assert sf.sleep_processor is None
+    assert sf._drivers == {}  # noqa: SLF001

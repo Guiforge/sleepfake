@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime
+import heapq
+import math
 import sys
 import threading
 import time as _time_module
@@ -16,62 +18,169 @@ from unittest.mock import patch
 import freezegun
 
 if TYPE_CHECKING:
+    import contextvars
+    from collections.abc import Callable
+
     if sys.version_info >= (3, 11):
         from typing import Self
     else:
         from typing_extensions import Self
 
-__all__ = ["DEFAULT_IGNORE", "SleepFake"]
+__all__ = ["DEFAULT_AUTOJUMP_THRESHOLD", "DEFAULT_IGNORE", "SleepFake"]
 
 _T = TypeVar("_T")
 
 
-class _NotInitializedError(Exception):
-    def __init__(self) -> None:
-        self.message = "sleep_queue is not initialized | should not happen"
-        super().__init__(self.message)
-
-
-# Item stored in the priority queue: (wake_deadline_naive_utc, sequence_counter, future)
-# The sequence counter breaks ties so that futures enqueued earlier are processed first.
-_QueueItem = tuple[datetime.datetime, int, asyncio.Future[None]]
+# A pending asyncio.sleep: (wake_deadline_naive_utc, sequence_counter, future).
+# The sequence counter breaks ties so that earlier sleeps wake first.
+_Sleeper = tuple[datetime.datetime, int, asyncio.Future[None]]
 
 # Keep pytest's duration timer on real clocks while preserving frozen-time behavior.
 # Keep pytest-timeout's session-expiry check on real clocks so advancing frozen time
 # during a test does not trigger a false ``session-timeout`` failure.
 DEFAULT_IGNORE: Final[list[str]] = ["_pytest.timing", "pytest_timeout"]
 
+# Real seconds the event loop must stay idle before the clock jumps to its next timer
+# (``asyncio.wait_for``, ``asyncio.timeout``, ``loop.call_later``). Gives real I/O, such
+# as a local test server, a chance to answer before a timeout is forced.
+DEFAULT_AUTOJUMP_THRESHOLD: Final = 0.02
+
 # Captured at import time, before any mock patch can replace them.
 # Used by the broad-patch mechanism to locate module-level aliases.
 _ORIG_TIME_SLEEP: Final = _time_module.sleep
 _ORIG_ASYNCIO_SLEEP: Final = asyncio.sleep
-
+_ORIG_CALL_AT: Final = asyncio.BaseEventLoop.call_at
 
 # Upper bound on event-loop turns spent waiting for other tasks to settle, so a task
 # that never stops scheduling callbacks cannot stall the fake clock forever.
 _MAX_IDLE_YIELDS: Final = 1000
 
 
-def _set_result_unless_done(fut: asyncio.Future[None]) -> None:
-    if not fut.done():
-        fut.set_result(None)
+def _others_ready(loop: asyncio.AbstractEventLoop, turns: int) -> bool:
+    """Whether other callbacks are runnable, i.e. the loop is not idle yet."""
+    # ponytail: reads BaseEventLoop._ready; loops without it (uvloop) count as idle.
+    return bool(getattr(loop, "_ready", None)) and turns < _MAX_IDLE_YIELDS
 
 
-async def _yield_once(loop: asyncio.AbstractEventLoop) -> None:
-    # Cannot use ``asyncio.sleep(0)``: it is patched and would re-enter amock_sleep.
-    tick: asyncio.Future[None] = loop.create_future()
-    loop.call_soon(_set_result_unless_done, tick)
-    await tick
+def _next_timer(loop: asyncio.AbstractEventLoop) -> asyncio.TimerHandle | None:
+    """The earliest live timer of *loop*."""
+    # ponytail: reads BaseEventLoop._scheduled; other loops get no timer autojump.
+    scheduled: list[asyncio.TimerHandle] = getattr(loop, "_scheduled", [])
+    live = [handle for handle in scheduled if not handle.cancelled()]
+    return min(live, key=asyncio.TimerHandle.when) if live else None
 
 
-async def _run_until_idle(loop: asyncio.AbstractEventLoop) -> None:
-    """Yield until no other callback is ready, so woken tasks reach their next ``await``."""
-    # ponytail: reads BaseEventLoop._ready; loops without it (uvloop) get a single yield.
-    ready = getattr(loop, "_ready", None)
-    for _ in range(_MAX_IDLE_YIELDS):
-        await _yield_once(loop)
-        if not ready:
+class _LoopDriver:
+    """Moves the frozen clock for one event loop, from ``call_soon`` callbacks.
+
+    Whenever the loop goes idle it advances the clock to whichever comes first: the
+    earliest ``asyncio.sleep`` deadline (immediately) or the earliest loop timer (after
+    ``autojump_threshold`` real seconds of idleness). Callbacks rather than a task: a
+    loop closed while callbacks are pending drops them silently.
+    """
+
+    def __init__(self, sleepfake: SleepFake, loop: asyncio.AbstractEventLoop) -> None:
+        self.sleepfake = sleepfake
+        self.loop = loop
+        self.sleepers: list[_Sleeper] = []
+        self._seq = 0
+        self._busy = False  # a _check or _resolve callback is scheduled
+        self._waking: asyncio.Future[None] | None = None  # popped, not resolved yet
+        self._armed: asyncio.TimerHandle | None = None
+        self._real_timer: threading.Timer | None = None
+        self._stopped = False
+
+    def add(self, deadline: datetime.datetime, future: asyncio.Future[None]) -> None:
+        self._seq += 1
+        heapq.heappush(self.sleepers, (deadline, self._seq, future))
+        self.kick()
+
+    def kick(self) -> None:
+        """Schedule a check of what to wake next (loop thread only)."""
+        if not self._busy and not self._stopped:
+            self._busy = True
+            self.loop.call_soon(self._check, 0)
+
+    def _kick_threadsafe(self) -> None:
+        with contextlib.suppress(RuntimeError):  # the loop was closed meanwhile
+            self.loop.call_soon_threadsafe(self.kick)
+
+    def _check(self, turns: int) -> None:
+        self._busy = False
+        factory = self.sleepfake.frozen_factory
+        if self._stopped or factory is None:
             return
+        # Let every runnable task reach its next await first: a task just woken may
+        # schedule a sleep or a timer that is due before anything we know about.
+        if _others_ready(self.loop, turns):
+            self._busy = True
+            self.loop.call_soon(self._check, turns + 1)
+            return
+        while self.sleepers and self.sleepers[0][2].cancelled():
+            heapq.heappop(self.sleepers)
+        # With an infinite threshold, loop timers only fire once sleeps move the clock.
+        timer = _next_timer(self.loop) if self.sleepfake.autojump_threshold != math.inf else None
+        if timer is not None and (
+            not self.sleepers
+            or timer.when() - self.loop.time()
+            <= (self.sleepers[0][0] - factory.time_to_freeze).total_seconds()
+        ):
+            self._jump_to_timer(timer, factory)
+        elif self.sleepers:
+            deadline, _, self._waking = heapq.heappop(self.sleepers)
+            if factory.time_to_freeze < deadline:
+                with self.sleepfake._tick_lock:  # noqa: SLF001
+                    factory.move_to(deadline)
+            self._busy = True
+            self.loop.call_soon(self._resolve, 0)
+
+    def _jump_to_timer(
+        self, timer: asyncio.TimerHandle, factory: freezegun.api.FrozenDateTimeFactory
+    ) -> None:
+        threshold = self.sleepfake.autojump_threshold
+        if threshold > 0 and timer is not self._armed:
+            # Wait for real idleness first; the real timer kicks us to re-check.
+            self._armed = timer
+            if self._real_timer is not None:
+                self._real_timer.cancel()
+            self._real_timer = threading.Timer(threshold, self._kick_threadsafe)
+            self._real_timer.daemon = True
+            self._real_timer.start()
+            return
+        self._armed = None
+        # Land 1 µs (freezegun's resolution) past the deadline: asyncio only runs a timer
+        # once ``when < time() + clock_resolution``, and at epoch-sized floats the 1 ns
+        # resolution is lost, so landing exactly on ``when`` never makes it due.
+        seconds = timer.when() - self.loop.time() + 1e-6
+        # Round up: landing a microsecond short of the timer would never make it due.
+        delta = datetime.timedelta(microseconds=math.ceil(seconds * 1_000_000))
+        with self.sleepfake._tick_lock:  # noqa: SLF001
+            factory.tick(delta=delta)
+        self.kick()  # the timer is due now; look again once it has run
+
+    def _resolve(self, turns: int) -> None:
+        # Let timers that are now due (e.g. asyncio.timeout) fire before waking.
+        if _others_ready(self.loop, turns) and not self._stopped:
+            self.loop.call_soon(self._resolve, turns + 1)
+            return
+        self._busy = False
+        future, self._waking = self._waking, None
+        if future is not None and not future.done():
+            future.set_result(None)
+        self.kick()
+
+    def stop(self) -> None:
+        self._stopped = True
+        if self._real_timer is not None:
+            self._real_timer.cancel()
+        # A closed loop can no longer run callbacks, so there is nothing to cancel there.
+        if not self.loop.is_closed():
+            for _, _, future in self.sleepers:
+                future.cancel()
+            if self._waking is not None:
+                self._waking.cancel()
+        self.sleepers.clear()
+        self._waking = None
 
 
 class SleepFake:
@@ -108,13 +217,26 @@ class SleepFake:
         10.0
     """
 
-    def __init__(self, *, ignore: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        ignore: list[str] | None = None,
+        autojump_threshold: float = DEFAULT_AUTOJUMP_THRESHOLD,
+    ) -> None:
         """Initialise a SleepFake instance.
 
         Args:
             ignore: Extra module prefixes that ``freezegun`` should leave on
                 real clocks.  Merged after :data:`DEFAULT_IGNORE`, so the
                 defaults are always active.
+            autojump_threshold: Real seconds an idle event loop waits before the
+                clock jumps to its next timer (``asyncio.wait_for``,
+                ``asyncio.timeout``, ``loop.call_later``). ``0`` jumps at once;
+                ``math.inf`` never jumps, so those timers need real time.
+                ``asyncio.sleep`` is not affected: it always wakes at once.
+
+        Raises:
+            ValueError: If *autojump_threshold* is negative or NaN.
 
         Examples:
             Default — built-in ignores always apply:
@@ -126,6 +248,10 @@ class SleepFake:
 
             >>> sf = SleepFake(ignore=["myapp.metrics"])
         """
+        if not autojump_threshold >= 0:
+            msg = f"autojump_threshold must be >= 0, got {autojump_threshold!r}"
+            raise ValueError(msg)
+        self.autojump_threshold = autojump_threshold
         resolved_ignore = [*DEFAULT_IGNORE, *(ignore or [])]
         self._ignore = resolved_ignore
         self.freeze_time = freezegun.freeze_time(
@@ -141,9 +267,8 @@ class SleepFake:
         self._prev_asleep: object = _ORIG_ASYNCIO_SLEEP
         self.time_patch = patch("time.sleep", new=self._sleep)
         self.asyncio_patch = patch("asyncio.sleep", new=self._asleep)
-        self.sleep_queue: asyncio.PriorityQueue[_QueueItem] | None = None
-        self.sleep_processor: asyncio.Task[None] | None = None
-        self._seq: int = 0  # tie-breaker for equal deadlines
+        self.call_at_patch = patch.object(asyncio.BaseEventLoop, "call_at", new=self._call_at())
+        self._drivers: dict[asyncio.AbstractEventLoop, _LoopDriver] = {}
         # tick() is a read-modify-write: without a lock, concurrent time.sleep calls
         # lose time on free-threaded builds.
         self._tick_lock = threading.Lock()
@@ -207,9 +332,29 @@ class SleepFake:
             self._freeze_started = False
             self.frozen_factory = None
 
-    def _init_async_patch(self) -> None:
-        self.sleep_queue = asyncio.PriorityQueue()
-        self.sleep_processor = asyncio.create_task(self.process_sleeps())
+    def _driver(self, loop: asyncio.AbstractEventLoop) -> _LoopDriver:
+        driver = self._drivers.get(loop)
+        if driver is None:
+            driver = self._drivers[loop] = _LoopDriver(self, loop)
+        return driver
+
+    def _call_at(self) -> Callable[..., asyncio.TimerHandle]:
+        """Build the ``BaseEventLoop.call_at`` replacement that wakes the loop's driver."""
+
+        def call_at(
+            loop: asyncio.BaseEventLoop,
+            when: float,
+            callback: Callable[..., object],
+            *args: object,
+            context: contextvars.Context | None = None,
+        ) -> asyncio.TimerHandle:
+            # The original, not the previous value: when nested, only the innermost
+            # SleepFake drives the clock.
+            handle = _ORIG_CALL_AT(loop, when, callback, *args, context=context)
+            self._driver(loop).kick()
+            return handle
+
+        return call_at
 
     def __enter__(self) -> Self:
         """Replace the time.sleep/asyncio.sleep function with the mock function when entering the context.
@@ -222,9 +367,8 @@ class SleepFake:
         self._start_freeze()
         self.time_patch.start()
         self.asyncio_patch.start()
+        self.call_at_patch.start()
         self._patch_module_aliases()
-        self.sleep_processor = None
-        self._seq = 0
         return self
 
     async def __aenter__(self) -> Self:
@@ -245,35 +389,23 @@ class SleepFake:
         """
         await self.aclose()
 
-    def _teardown(self) -> asyncio.Task[None] | None:
-        """Undo every patch, cancel pending sleeps and return the processor to await, if any."""
+    def _teardown(self) -> None:
+        """Undo every patch and cancel pending sleeps."""
         self._unpatch_module_aliases()
         self.time_patch.stop()
         self.asyncio_patch.stop()
+        self.call_at_patch.stop()
         self._stop_freeze()
-        processor, self.sleep_processor = self.sleep_processor, None
-        queue, self.sleep_queue = self.sleep_queue, None
-        # Cancel any futures still in the queue so coroutines awaiting them are not leaked.
-        # A closed loop can no longer run callbacks, so there is nothing to cancel there.
-        while queue is not None and not queue.empty():
-            _, _, fut = queue.get_nowait()
-            if not fut.get_loop().is_closed():
-                fut.cancel()
-        if processor is None or processor.done() or processor.get_loop().is_closed():
-            return None
-        processor.cancel()
-        return processor
+        for driver in self._drivers.values():
+            driver.stop()
+        self._drivers.clear()
 
     async def aclose(self) -> None:
-        """Cancel the background sleep processor and drain any pending futures.
+        """Undo every patch and cancel pending sleeps (async counterpart of ``__exit__``).
 
-        Safe to call multiple times; subsequent calls are no-ops once the
-        processor has already been stopped.
+        Safe to call multiple times.
         """
-        processor = self._teardown()
-        if processor is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await processor
+        self._teardown()
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         """Restore ``time.sleep`` / ``asyncio.sleep`` and stop the frozen clock.
@@ -330,9 +462,9 @@ class SleepFake:
     async def amock_sleep(self, seconds: float, result: _T | None = None) -> _T | None:
         """Enqueue a sleep request and yield until the frozen clock reaches the deadline.
 
-        This is the replacement injected for ``asyncio.sleep``.  The background
-        :meth:`process_sleeps` task advances the frozen clock and resolves
-        futures in deadline order.
+        This is the replacement injected for ``asyncio.sleep``.  Once the event loop
+        is idle, the frozen clock jumps to the earliest deadline and that sleep wakes,
+        so concurrent sleeps resolve in deadline order.
 
         Args:
             seconds: Number of seconds to wait (relative to the current frozen time).
@@ -341,9 +473,6 @@ class SleepFake:
 
         Returns:
             *result*, like the real ``asyncio.sleep``.
-
-        Raises:
-            _NotInitializedError: If the sleep queue has not been initialised.
 
         Examples:
             Called indirectly via the patched ``asyncio.sleep`` (most common):
@@ -371,68 +500,16 @@ class SleepFake:
             [1, 2, 3]
         """
         loop = asyncio.get_running_loop()
-        # Lazily start the processor, and restart it when a new event loop is used
-        # (e.g. ``asyncio.run`` called twice inside one sync ``with SleepFake()``).
-        processor = self.sleep_processor
-        if processor is None or processor.done() or processor.get_loop() is not loop:
-            self._init_async_patch()
-
-        if self.sleep_queue is None:
-            raise _NotInitializedError
-
         future: asyncio.Future[None] = loop.create_future()
         try:
             # Naive UTC, to match frozen_factory.time_to_freeze.
-            deadline: datetime.datetime | None = datetime.datetime.now(
-                tz=datetime.timezone.utc
-            ).replace(tzinfo=None) + datetime.timedelta(seconds=seconds)
+            deadline = datetime.datetime.now(tz=datetime.timezone.utc).replace(
+                tzinfo=None
+            ) + datetime.timedelta(seconds=seconds)
         except OverflowError:
-            # inf, or beyond datetime's range: never enqueued, so it sleeps until cancelled.
-            deadline = None
-        if deadline is not None:
-            self._seq += 1
-            await self.sleep_queue.put((deadline, self._seq, future))
+            # inf, or beyond datetime's range: never scheduled, so it sleeps until cancelled.
+            pass
+        else:
+            self._driver(loop).add(deadline, future)
         await future
         return result
-
-    async def process_sleeps(self) -> None:
-        """Drain the priority queue and resolve futures in wake-deadline order.
-
-        Runs as a background :class:`asyncio.Task` for the lifetime of the
-        :class:`SleepFake` context.  For each item dequeued the frozen clock is
-        moved to the item's deadline (if it has not already passed) and the
-        associated future is resolved, unblocking the corresponding
-        ``asyncio.sleep`` caller.
-
-        Raises:
-            _NotInitializedError: If the sleep queue has not been initialised.
-        """
-        if self.sleep_queue is None:
-            raise _NotInitializedError
-
-        queue = self.sleep_queue
-        loop = asyncio.get_running_loop()
-        while True:
-            item = await queue.get()
-            try:
-                # Let every runnable task reach its next await first: a task just woken
-                # may enqueue a sleep that is due before this one.
-                await _run_until_idle(loop)
-                queue.put_nowait(item)
-                item = queue.get_nowait()
-                deadline, _, future = item
-                if future.cancelled():
-                    continue
-                if (
-                    self.frozen_factory is not None
-                    and self.frozen_factory.time_to_freeze < deadline
-                ):
-                    self.frozen_factory.move_to(deadline)
-                # Let timers that are now due (e.g. asyncio.timeout) fire before waking.
-                await _run_until_idle(loop)
-            except asyncio.CancelledError:
-                # The context is exiting: release the sleeper we already dequeued.
-                item[2].cancel()
-                raise
-            if not future.cancelled():
-                future.set_result(None)

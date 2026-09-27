@@ -5,12 +5,12 @@
 `SleepFake` is a pytest plugin and context manager that fakes `time.sleep` / `asyncio.sleep` by:
 - Patching both via `unittest.mock.patch`
 - Advancing a `freezegun` frozen clock by the requested duration instead of actually sleeping
-- Managing an `asyncio.PriorityQueue` (keyed by deadline + sequence counter) + background `Task` for correct async sleep ordering
+- Driving each event loop with a `_LoopDriver` (`call_soon` callbacks, no background task): when the loop is idle it jumps the clock to the earliest `asyncio.sleep` deadline, or, after `autojump_threshold` real seconds, to the earliest loop timer (`wait_for`, `asyncio.timeout`, `call_later`). `BaseEventLoop.call_at` is patched to wake the driver when a timer is scheduled
 
 Key files:
 - `src/sleepfake/__init__.py` — `SleepFake` class (sync + async context manager)
 - `src/sleepfake/plugin.py` — pytest fixture and marker registration
-- `tests/` — sync tests (`test_sync.py`), async tests (`test_async.py`)
+- `tests/` — sync tests (`test_sync.py`), async tests (`test_async.py`), loop-timer autojump (`test_autojump.py`)
 
 ## Build and Test
 
