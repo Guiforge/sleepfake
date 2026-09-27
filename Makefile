@@ -7,7 +7,7 @@
 # Variables
 # ---------------------------------------------------------------------------
 UV             := uv run
-PYTHON_VERSIONS := 3.10 3.11 3.12 3.13 3.14 3.15
+PYTHON_VERSIONS := 3.10 3.11 3.12 3.13 3.14 3.15 3.14t
 
 define BROWSER_PYSCRIPT
 import os, webbrowser, sys

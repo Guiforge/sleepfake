@@ -3,6 +3,7 @@ import datetime
 import importlib.metadata
 import re
 import sys
+import threading
 import time
 import types
 
@@ -877,3 +878,22 @@ def test_conftest_ignore_only_applies_to_its_subtree(pytester: pytest.Pytester) 
     )
     result = pytester.runpytest_subprocess("-p", "no:randomly")
     result.assert_outcomes(passed=2)
+
+
+def test_concurrent_time_sleep_from_threads_loses_no_time() -> None:
+    """``time.sleep`` from many threads adds up exactly (free-threaded builds included)."""
+    threads, sleeps = 8, 500
+
+    def worker() -> None:
+        for _ in range(sleeps):
+            time.sleep(1)
+
+    with SleepFake():
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+        pool = [threading.Thread(target=worker) for _ in range(threads)]
+        for t in pool:
+            t.start()
+        for t in pool:
+            t.join()
+        elapsed = (datetime.datetime.now(tz=datetime.timezone.utc) - t0).total_seconds()
+    assert elapsed == threads * sleeps

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import datetime
 import sys
+import threading
 import time as _time_module
 import types
 import warnings
@@ -143,6 +144,9 @@ class SleepFake:
         self.sleep_queue: asyncio.PriorityQueue[_QueueItem] | None = None
         self.sleep_processor: asyncio.Task[None] | None = None
         self._seq: int = 0  # tie-breaker for equal deadlines
+        # tick() is a read-modify-write: without a lock, concurrent time.sleep calls
+        # lose time on free-threaded builds.
+        self._tick_lock = threading.Lock()
 
     def _swap_module_attrs(self, swaps: list[tuple[object, object]], *, honor_ignore: bool) -> None:
         """Replace, in every loaded module, each attribute that *is* ``old`` with ``new``.
@@ -320,7 +324,8 @@ class SleepFake:
         if self.frozen_factory is None:
             msg = "mock_sleep called outside SleepFake context"
             raise RuntimeError(msg)
-        self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))
+        with self._tick_lock:
+            self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))
 
     async def amock_sleep(self, seconds: float, result: _T | None = None) -> _T | None:
         """Enqueue a sleep request and yield until the frozen clock reaches the deadline.

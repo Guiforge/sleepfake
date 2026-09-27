@@ -17,3 +17,4 @@ wheels/
 .coverage
 htmlcov/
 .coverage.*
+.venv-*
