@@ -675,3 +675,205 @@ def test_entry_point_is_named_sleepfake() -> None:
     """The pytest11 entry point is named ``sleepfake`` so ``-p no:sleepfake`` works."""
     names = {ep.name for ep in importlib.metadata.entry_points(group="pytest11")}
     assert "sleepfake" in names
+
+
+def test_broad_patch_skips_non_module_entries_in_sys_modules() -> None:
+    """Non-module objects in ``sys.modules`` are left alone instead of crashing the scan."""
+    sentinel = object()
+    sys.modules["_sleepfake_test_not_a_module"] = sentinel  # ty: ignore[invalid-assignment]
+    try:
+        with SleepFake():
+            time.sleep(1)
+        assert sys.modules["_sleepfake_test_not_a_module"] is sentinel
+    finally:
+        sys.modules.pop("_sleepfake_test_not_a_module", None)
+
+
+def _module_with_sleep_alias(name: str) -> types.ModuleType:
+    mod = types.ModuleType(name)
+    mod.__dict__["sleep"] = time.sleep  # simulates ``from time import sleep``
+    sys.modules[name] = mod
+    return mod
+
+
+def test_alias_imported_inside_context_is_restored() -> None:
+    """``from time import sleep`` run inside the context does not keep the fake after exit."""
+    real_sleep = time.sleep
+    try:
+        with SleepFake():
+            late = _module_with_sleep_alias("_sleepfake_test_late_import")
+            assert late.sleep is not real_sleep
+        assert late.sleep is real_sleep
+    finally:
+        sys.modules.pop("_sleepfake_test_late_import", None)
+
+
+def test_user_reassignment_inside_context_is_kept() -> None:
+    """Exit only restores attributes that still hold the fake."""
+    mod = _module_with_sleep_alias("_sleepfake_test_reassign")
+
+    def custom_sleep(_: float) -> None:
+        pass
+
+    try:
+        with SleepFake():
+            mod.__dict__["sleep"] = custom_sleep
+        assert mod.sleep is custom_sleep
+    finally:
+        sys.modules.pop("_sleepfake_test_reassign", None)
+
+
+def test_nested_contexts_drive_the_inner_clock() -> None:
+    """In nested contexts, module aliases advance the innermost clock and are restored LIFO."""
+    real_sleep = time.sleep
+    mod = _module_with_sleep_alias("_sleepfake_test_nested")
+    try:
+        with SleepFake():
+            outer_t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+            outer_sleep = mod.sleep
+            with SleepFake():
+                t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+                mod.sleep(10)
+                time.sleep(5)
+                assert (datetime.datetime.now(tz=datetime.timezone.utc) - t0).total_seconds() == 15
+            assert mod.sleep is outer_sleep
+            assert time.sleep is outer_sleep
+            assert datetime.datetime.now(tz=datetime.timezone.utc) == outer_t0
+        assert mod.sleep is real_sleep
+        assert time.sleep is real_sleep
+    finally:
+        sys.modules.pop("_sleepfake_test_nested", None)
+
+
+@pytest.mark.parametrize("mode", [["--sleepfake"], []])
+def test_marker_or_autouse_with_nested_fixture_restores_sleep(
+    pytester: pytest.Pytester, mode: list[str]
+) -> None:
+    """Marker/autouse plus an explicit ``sleepfake`` request exits cleanly and restores sleep."""
+    pytester.makepyfile("""
+        import time
+        import pytest
+
+        @pytest.mark.sleepfake
+        def test_1(request):
+            request.getfixturevalue("sleepfake")
+            time.sleep(1)
+
+        @pytest.mark.no_sleepfake
+        def test_2():
+            assert "built-in" in repr(time.sleep)
+    """)
+    result = pytester.runpytest_subprocess("-p", "no:randomly", *mode)
+    result.assert_outcomes(passed=2)
+
+
+@pytest.mark.parametrize("mode", [["--sleepfake"], []])
+def test_function_fixture_teardown_is_faked(pytester: pytest.Pytester, mode: list[str]) -> None:
+    """Sleeps in a function fixture's teardown are faked under the marker and autouse."""
+    pytester.makepyfile("""
+        import time
+        import pytest
+
+        @pytest.fixture
+        def slow_teardown():
+            yield
+            assert "built-in" not in repr(time.sleep)
+            time.sleep(30)
+
+        @pytest.mark.sleepfake
+        def test_uses_fixture(slow_teardown):
+            pass
+    """)
+    result = pytester.runpytest_subprocess(*mode)
+    result.assert_outcomes(passed=1)
+
+
+def test_session_fixture_stays_on_real_clock_in_autouse(pytester: pytest.Pytester) -> None:
+    """Broader-scope fixtures are set up and torn down outside the frozen clock."""
+    pytester.makepyfile("""
+        import time
+        import pytest
+
+        @pytest.fixture(scope="session")
+        def budget():
+            start = time.monotonic()
+            yield
+            elapsed = time.monotonic() - start
+            assert 0 <= elapsed < 60, elapsed
+
+        def test_uses_budget(budget):
+            time.sleep(1000)
+    """)
+    result = pytester.runpytest_subprocess("--sleepfake")
+    result.assert_outcomes(passed=1)
+
+
+@pytest.mark.parametrize(
+    "value", ['"helper"', '{"helper"}', '("helper",)'], ids=["str", "set", "tuple"]
+)
+def test_conftest_ignore_accepts_str_and_iterables(pytester: pytest.Pytester, value: str) -> None:
+    """``pytest_sleepfake_ignore`` accepts a string or any iterable of strings."""
+    pytester.makeconftest(f"pytest_sleepfake_ignore = {value}")
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """,
+        test_it="""
+            import time
+            import helper
+
+            def test_ignored(sleepfake):
+                before = helper.now()
+                time.sleep(100)
+                assert helper.now() - before < 1
+        """,
+    )
+    result = pytester.runpytest_subprocess()
+    result.assert_outcomes(passed=1)
+
+
+def test_conftest_ignore_rejects_other_types(pytester: pytest.Pytester) -> None:
+    """A non-string, non-iterable ``pytest_sleepfake_ignore`` is a usage error."""
+    pytester.makeconftest("pytest_sleepfake_ignore = 42")
+    pytester.makepyfile("""
+        def test_it(sleepfake):
+            pass
+    """)
+    result = pytester.runpytest_subprocess()
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*pytest_sleepfake_ignore must be a str or an iterable*"])
+
+
+def test_conftest_ignore_only_applies_to_its_subtree(pytester: pytest.Pytester) -> None:
+    """A sibling directory's conftest ignore list does not leak into other directories."""
+    pytester.makepyfile(
+        helper="""
+            import time
+
+            def now():
+                return time.time()
+        """
+    )
+    sub_a = pytester.mkpydir("sub_a")
+    sub_a.joinpath("conftest.py").write_text('pytest_sleepfake_ignore = ["helper"]\n')
+    sub_a.joinpath("test_a.py").write_text(
+        "import time\n"
+        "import helper\n\n"
+        "def test_ignored(sleepfake):\n"
+        "    before = helper.now()\n"
+        "    time.sleep(100)\n"
+        "    assert helper.now() - before < 1\n"
+    )
+    pytester.mkpydir("sub_b").joinpath("test_b.py").write_text(
+        "import time\n"
+        "import helper\n\n"
+        "def test_not_ignored(sleepfake):\n"
+        "    before = helper.now()\n"
+        "    time.sleep(100)\n"
+        "    assert helper.now() - before >= 100\n"
+    )
+    result = pytester.runpytest_subprocess("-p", "no:randomly")
+    result.assert_outcomes(passed=2)

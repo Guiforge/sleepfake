@@ -30,4 +30,4 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
-      - run: make test
+      - run: make cov
