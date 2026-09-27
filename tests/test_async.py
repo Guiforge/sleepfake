@@ -1,4 +1,7 @@
 import asyncio
+import datetime
+import gc
+import logging
 import sys
 import types
 
@@ -355,10 +358,13 @@ async def test_async_fixture_cleanup(sleepfake: SleepFake) -> None:
 
 
 @pytest.mark.asyncio
-async def test_amock_sleep_negative_raises() -> None:
-    """amock_sleep raises ValueError for negative sleep duration."""
-    with SleepFake(), pytest.raises(ValueError, match="non-negative"):
+async def test_amock_sleep_negative_behaves_like_zero() -> None:
+    """Like the real asyncio.sleep, a negative delay returns immediately without raising."""
+    async with SleepFake():
+        loop = asyncio.get_running_loop()
+        start = loop.time()
         await asyncio.sleep(-1)
+        assert loop.time() == start
 
 
 @pytest.mark.asyncio
@@ -446,3 +452,204 @@ async def test_broad_patch_asyncio_sleep_module_alias() -> None:
         assert fake_mod.sleep is original_sleep  # type: ignore[attr-defined]
     finally:
         sys.modules.pop("_sleepfake_test_broad_async", None)
+
+
+@pytest.mark.asyncio
+async def test_amock_sleep_returns_result() -> None:
+    """``asyncio.sleep(delay, result)`` returns *result*, like the real function."""
+    async with SleepFake():
+        assert await asyncio.sleep(1, "done") == "done"
+        assert await asyncio.sleep(1, result=42) == 42
+        assert await asyncio.sleep(1) is None
+
+
+@pytest.mark.asyncio
+async def test_exit_cancels_in_flight_future() -> None:
+    """A sleep already dequeued by the processor is cancelled on exit, not leaked forever."""
+    loop = asyncio.get_running_loop()
+
+    async def real_yield() -> None:
+        fut: asyncio.Future[None] = loop.create_future()
+        loop.call_soon(fut.set_result, None)
+        await fut
+
+    sf = SleepFake()
+    sf.__enter__()
+    task = asyncio.create_task(asyncio.sleep(5))
+    for _ in range(10):
+        await real_yield()
+        if sf.sleep_queue is not None and sf.sleep_queue.empty():
+            break
+    # The processor has dequeued the sleep and is mid-tick; exit now.
+    assert not task.done()
+    sf.__exit__(None, None, None)
+    for _ in range(5):
+        await real_yield()
+    assert task.done()
+    assert task.cancelled() or task.exception() is None
+
+
+@pytest.mark.filterwarnings("ignore:The 'asleepfake' fixture is deprecated:DeprecationWarning")
+async def test_deprecated_asleepfake_fixture_still_works(asleepfake: SleepFake) -> None:
+    """The deprecated ``asleepfake`` fixture keeps working until it is removed."""
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    await asyncio.sleep(10)
+    assert loop.time() - start == 10
+    assert asleepfake.sleep_processor is not None
+
+
+def test_asleepfake_fixture_emits_deprecation_warning(pytester: pytest.Pytester) -> None:
+    """Requesting ``asleepfake`` emits a DeprecationWarning pointing to ``sleepfake``."""
+    pytester.makepyfile("""
+        import pytest
+
+        @pytest.mark.asyncio
+        async def test_uses_deprecated(asleepfake):
+            pass
+    """)
+    result = pytester.runpytest_subprocess("-W", "error::DeprecationWarning")
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*asleepfake*deprecated*"])
+
+
+def _elapsed(t0: datetime.datetime) -> float:
+    return (datetime.datetime.now(tz=datetime.timezone.utc) - t0).total_seconds()
+
+
+async def test_woken_task_sleeps_again_before_clock_advances() -> None:
+    """A task woken by the processor re-sleeps before the clock jumps to the next deadline."""
+    seen: list[float] = []
+    async with SleepFake():
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+
+        async def heartbeat() -> None:
+            for _ in range(3):
+                await asyncio.sleep(1)
+                seen.append(_elapsed(t0))
+
+        await asyncio.gather(heartbeat(), asyncio.sleep(100))
+    assert seen == [1, 2, 3]
+
+
+async def test_periodic_task_is_not_starved() -> None:
+    """A 1 s ticker runs 4 times during a 5 s sleep, as with real asyncio."""
+    ticks: list[int] = []
+    async with SleepFake():
+
+        async def ticker() -> None:
+            for _ in range(10):
+                await asyncio.sleep(1)
+                ticks.append(1)
+
+        task = asyncio.create_task(ticker())
+        await asyncio.sleep(5)
+        task.cancel()
+    assert len(ticks) == 4
+
+
+async def test_sleep_zero_does_not_advance_to_pending_deadline() -> None:
+    """``sleep(0)`` with a longer sleep pending must not jump the clock."""
+    async with SleepFake():
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+        background = asyncio.create_task(asyncio.sleep(60))
+        await asyncio.sleep(0)
+        assert _elapsed(t0) == 0
+        background.cancel()
+
+
+async def test_sleep_infinity_waits_until_cancelled() -> None:
+    """``asyncio.sleep(inf)`` pends until cancelled instead of raising OverflowError."""
+    async with SleepFake():
+        task = asyncio.create_task(asyncio.sleep(float("inf")))
+        await asyncio.sleep(1)
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+def test_asyncio_run_twice_in_one_sync_context() -> None:
+    """A sync context survives several event loops (e.g. ``asyncio.run`` twice)."""
+
+    async def main() -> float:
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+        await asyncio.sleep(1)
+        return _elapsed(t0)
+
+    with SleepFake():
+        assert asyncio.run(main()) == 1
+        assert asyncio.run(main()) == 1
+
+
+# Closing a loop with a pending task makes asyncio report it when it is garbage-collected.
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+def test_exit_after_event_loop_closed(caplog: pytest.LogCaptureFixture) -> None:
+    """Exiting after the loop that ran async sleeps was closed does not raise."""
+    loop = asyncio.new_event_loop()
+    with SleepFake():
+        # One of these is held by the processor, the other is still queued at exit.
+        pending = [loop.create_task(asyncio.sleep(10)), loop.create_task(asyncio.sleep(20))]
+        loop.run_until_complete(asyncio.sleep(1))
+        loop.close()
+    assert not any(task.done() for task in pending)
+    del pending, loop
+    with caplog.at_level(logging.CRITICAL, logger="asyncio"):
+        gc.collect()  # collect the orphaned processor here, not during a later test
+
+
+async def test_cancelled_sleeper_left_in_queue_is_skipped() -> None:
+    """A cancelled sleep still queued is skipped and does not stop the clock at its deadline."""
+    async with SleepFake():
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+        task = asyncio.create_task(asyncio.sleep(10))
+        await asyncio.sleep(1)
+        task.cancel()
+        await asyncio.sleep(20)
+        assert _elapsed(t0) == 21
+
+
+async def test_deadline_already_passed_does_not_move_clock_back() -> None:
+    """A sync ``time.sleep`` that overshoots a queued deadline never rewinds the clock."""
+    async with SleepFake() as sf:
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+        task = asyncio.create_task(asyncio.sleep(5))
+        await asyncio.sleep(0)
+        sf.mock_sleep(10)  # what a sync ``time.sleep`` does
+        await task
+        assert _elapsed(t0) == 10
+
+
+async def test_sleep_after_timeout_keeps_working() -> None:
+    """After a timeout cancels a sleep, later sleeps are still processed."""
+    async with SleepFake():
+        t0 = datetime.datetime.now(tz=datetime.timezone.utc)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.sleep(10), timeout=2)
+        await asyncio.sleep(1)
+        assert _elapsed(t0) == 11
+
+
+async def test_busy_task_does_not_stall_the_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A task that never stops scheduling callbacks cannot block sleeps forever."""
+    monkeypatch.setattr("sleepfake.core._MAX_IDLE_YIELDS", 5)
+    loop = asyncio.get_running_loop()
+    stop = False
+
+    def spin() -> None:
+        if not stop:
+            loop.call_soon(spin)
+
+    async with SleepFake():
+        loop.call_soon(spin)
+        await asyncio.sleep(1)
+        stop = True
+
+
+async def test_aclose_twice_is_a_no_op() -> None:
+    """``aclose`` can be called again after the context already exited."""
+    sf = SleepFake()
+    async with sf:
+        await asyncio.sleep(1)
+    await sf.aclose()
+    assert sf.sleep_processor is None

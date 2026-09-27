@@ -1,4 +1,4 @@
-.PHONY: help lint lint-ci test test-all test-all-python hooks coverage dist \
+.PHONY: help lint lint-ci test test-all test-all-python hooks cov coverage dist \
         check-uv prod-install dev-install upgrade-dep \
         clean clean-build clean-pyc clean-test
 .DEFAULT_GOAL := help
@@ -81,9 +81,13 @@ test-all-python: ## run tests against all supported Python versions
 hooks: ## run prek hooks on all files
 	$(UV) prek run --all-files
 
-coverage: ## check code coverage quickly with the default Python
+cov: ## run tests under coverage and enforce the 100% floor
+	rm -f .coverage .coverage.*
 	$(UV) coverage run -m pytest
+	$(UV) coverage combine -q
 	$(UV) coverage report
+
+coverage: cov ## same as cov, then open the HTML report
 	$(UV) coverage html
 	$(BROWSER) htmlcov/index.html
 
