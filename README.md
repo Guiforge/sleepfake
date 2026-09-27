@@ -3,36 +3,36 @@
   <img src="./logo.png" alt="SleepFake Logo" width="160"/>
 </p>
 <p align="center">
-  <a href="https://github.com/guipouy/sleepfake"><img src="https://img.shields.io/badge/github-sleepfake-181717?logo=github" alt="GitHub"></a>
+  <a href="https://github.com/Guiforge/sleepfake/actions/workflows/test.yml"><img src="https://github.com/Guiforge/sleepfake/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <a href="https://pypi.org/project/sleepfake/"><img src="https://img.shields.io/pypi/v/sleepfake.svg?color=blue" alt="PyPI version"></a>
   <a href="https://pypi.org/project/sleepfake/"><img src="https://img.shields.io/pypi/pyversions/sleepfake.svg" alt="Python versions"></a>
+  <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage 100%"/>
+  <img src="https://img.shields.io/badge/free--threading-ready-blueviolet" alt="Free-threading ready"/>
   <img src="https://img.shields.io/pypi/l/sleepfake.svg" alt="License: MIT"/>
-  <a href="https://github.com/spulec/freezegun"><img src="https://img.shields.io/badge/dependency-freezegun-blue" alt="freezegun"></a>
-  <img src="https://img.shields.io/badge/pytest%20plugin-stable-green" alt="pytest plugin stable"/>
 </p>
 
 # 💤 SleepFake: Time Travel for Your Tests
 
-Ever wish your tests could skip the waiting but keep correct time behavior? **SleepFake** patches `time.sleep` and `asyncio.sleep` so tests return instantly while frozen time moves forward exactly as requested.
+Ever wish your tests could skip the waiting but keep correct time behavior? **SleepFake** patches `time.sleep` and `asyncio.sleep` so tests return instantly while frozen time moves forward exactly as requested. Async timeouts (`asyncio.wait_for`, `asyncio.timeout`, `loop.call_later`) fire on the fake clock too.
 
-## 📦 Install (30 seconds)
+## 📦 Install
 
 ```bash
 pip install sleepfake
 ```
 
-## ⚡ Quick start (recommended): global autouse
+Python 3.10 to 3.15, including free-threaded builds (`3.13t`+). The pytest plugin registers itself.
 
-If you want instant wins with almost no boilerplate, make SleepFake apply to **every test**.
+## ⚡ Quick start: global autouse
 
-Add to `pyproject.toml`:
+Make SleepFake apply to **every test**. Add to `pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
 sleepfake_autouse = true
 ```
 
-Now regular tests automatically skip sleeps:
+Now regular tests skip sleeps:
 
 ```python
 import time
@@ -44,39 +44,47 @@ def test_retry():
     assert time.time() - start >= 30
 ```
 
-Async works the same way:
+Async works the same way, timeouts included:
 
 ```python
 import asyncio
+
+import pytest
 
 
 async def test_polling():
     start = asyncio.get_running_loop().time()
     await asyncio.sleep(10)  # returns instantly
     assert asyncio.get_running_loop().time() - start >= 10
+
+
+async def test_gives_up():
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(asyncio.Event().wait(), timeout=60)  # ~20 ms, not 60 s
 ```
 
-> **`pytest-asyncio` users:** add `asyncio_mode = "auto"` to `pyproject.toml` (or mark each test with `@pytest.mark.asyncio`) so pytest collects async tests correctly.
-
-✅ **Result:** your suite keeps time-based correctness, minus the wall-clock pain.
+> **`pytest-asyncio` users:** add `asyncio_mode = "auto"` (or mark tests with `@pytest.mark.asyncio`) so pytest collects async tests.
 
 ## 🧭 Choose your usage style
 
-| Use case                            | Best option                                                  | Boilerplate |
-| ----------------------------------- | ------------------------------------------------------------ | ----------- |
-| Apply everywhere (most teams)       | Global autouse (`sleepfake_autouse = true` or `--sleepfake`) | Lowest      |
-| Per-test explicit control           | `sleepfake` fixture                                          | Low         |
-| Decoration-style usage              | `@pytest.mark.sleepfake`                                     | Low         |
-| Non-pytest scripts / direct control | `SleepFake` context manager                                  | Medium      |
+| Use case                            | Best option                                                  |
+| ----------------------------------- | ------------------------------------------------------------ |
+| Apply everywhere (most teams)       | Global autouse (`sleepfake_autouse = true` or `--sleepfake`) |
+| Per-test explicit control           | `sleepfake` fixture                                          |
+| Decoration-style usage              | `@pytest.mark.sleepfake`                                     |
+| Non-pytest scripts / direct control | `SleepFake` context manager                                  |
 
-## 📚 Full details (expand as needed)
+All pytest styles share one instance per test: combining them never patches twice.
+
+## 📚 Usage
 
 <details>
-<summary><strong>Context manager usage</strong></summary>
+<summary><strong>Context manager</strong></summary>
 
 ```python
-import time
 import asyncio
+import time
+
 from sleepfake import SleepFake
 
 # Sync
@@ -86,21 +94,17 @@ with SleepFake():
     assert time.time() - start >= 10
 
 
-# Async — use async with for proper cleanup of the background processor
-async def test_async():
+# Async: `async with` or plain `with` both work
+async def main():
     async with SleepFake():
         start = asyncio.get_running_loop().time()
         await asyncio.sleep(5)  # returns instantly
         assert asyncio.get_running_loop().time() - start >= 5
 ```
 
-Customize freezegun ignores via `ignore`:
+Keep some modules on real clocks with `ignore`:
 
 ```python
-from sleepfake import SleepFake
-
-# `_pytest.timing` is always ignored by default to keep pytest durations sane.
-# Add your own modules as needed.
 with SleepFake(ignore=["my_project.telemetry"]):
     ...
 ```
@@ -108,11 +112,10 @@ with SleepFake(ignore=["my_project.telemetry"]):
 </details>
 
 <details>
-<summary><strong>Fixture usage (`sleepfake`)</strong></summary>
-
-Install once; the `sleepfake` fixture is available automatically in tests.
+<summary><strong>Fixture (<code>sleepfake</code>)</strong></summary>
 
 ```python
+import asyncio
 import time
 
 
@@ -120,58 +123,45 @@ def test_retry_logic(sleepfake):
     start = time.time()
     time.sleep(30)  # instantly skipped
     assert time.time() - start >= 30
-```
-
-```python
-import asyncio
 
 
 async def test_polling(sleepfake):
     start = asyncio.get_running_loop().time()
-    await asyncio.gather(
-        asyncio.sleep(1),
-        asyncio.sleep(5),
-        asyncio.sleep(3),
-    )
-    # All three complete instantly; frozen clock sits at +5 s
+    await asyncio.gather(asyncio.sleep(1), asyncio.sleep(5), asyncio.sleep(3))
+    # All three complete instantly; the clock sits at +5 s
     assert asyncio.get_running_loop().time() - start >= 5
 ```
 
-> **Deprecated:** `asleepfake` is deprecated. Use `sleepfake` for both sync and async tests.
+The fixture yields the active `SleepFake`; `sleepfake.mock_sleep(60)` advances the clock by hand.
+
+> **Deprecated:** `asleepfake` still works but warns. Use `sleepfake` for sync and async tests.
 
 </details>
 
 <details>
-<summary><strong>Marker usage (`@pytest.mark.sleepfake`)</strong></summary>
+<summary><strong>Marker (<code>@pytest.mark.sleepfake</code>)</strong></summary>
 
 ```python
 import time
-import asyncio
+
 import pytest
 
 
 @pytest.mark.sleepfake
-def test_marked_sync():
+def test_marked():
     start = time.time()
     time.sleep(100)
     assert time.time() - start >= 100
-
-
-@pytest.mark.sleepfake
-async def test_marked_async():
-    start = asyncio.get_running_loop().time()
-    await asyncio.sleep(100)
-    assert asyncio.get_running_loop().time() - start >= 100
 ```
 
-If a test already requests the `sleepfake` fixture, this marker becomes a no-op (no double patching).
+Works on async tests, classes and modules (`pytestmark`) too.
 
 </details>
 
 <details>
-<summary><strong>Global autouse: all options and opt-out</strong></summary>
+<summary><strong>Global autouse, opt-out and ignores</strong></summary>
 
-### Option A — config file (`pyproject.toml` / `pytest.ini`)
+Enable it in config or on the command line:
 
 ```toml
 # pyproject.toml
@@ -180,172 +170,101 @@ sleepfake_autouse = true
 sleepfake_ignore = ["my_project.telemetry", "my_project.metrics"]
 ```
 
-```ini
-# pytest.ini
-[pytest]
-sleepfake_autouse = true
-sleepfake_ignore =
-    my_project.telemetry
-    my_project.metrics
-```
-
-### Option B — CLI flag
-
 ```bash
-pytest --sleepfake
-pytest --sleepfake --sleepfake-ignore my_project.telemetry --sleepfake-ignore my_project.metrics
+pytest --sleepfake --sleepfake-ignore my_project.telemetry
 ```
 
-### Disable autouse per-test
+Opt a single test out with `@pytest.mark.no_sleepfake` (it has no effect if the test explicitly requests the `sleepfake` fixture).
 
-```python
-import time
-import pytest
-
-
-# This test runs with SleepFake (autouse applies).
-def test_patched():
-    start = time.time()
-    time.sleep(100)
-    assert time.time() - start >= 100
-
-
-# This test uses real time — SleepFake is NOT applied.
-@pytest.mark.no_sleepfake
-def test_needs_real_time():
-    start = time.time()
-    time.sleep(0.01)
-    assert time.time() - start < 5
-```
-
-`@pytest.mark.no_sleepfake` only disables the autouse layer.
-If your test explicitly requests `sleepfake`, it still patches.
-
-### Option C — per-directory autouse in `conftest.py`
+Directory-scoped ignores go in a `conftest.py`; the nearest one wins:
 
 ```python
 # conftest.py
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def _sleepfake_sync(sleepfake):
-    """Auto-apply SleepFake for every test (sync and async)."""
-
-
-@pytest.fixture(autouse=True)
-async def _sleepfake_async(sleepfake):
-    """Async counterpart — shares the same sleepfake instance; no double-patch."""
+pytest_sleepfake_ignore = ["my_project.telemetry"]
 ```
 
-Both fixtures share one `sleepfake` instance.
+Function-scoped fixtures are set up and torn down with the fake active; session-, module- and class-scoped fixtures stay on real time.
 
 </details>
 
 <details>
-<summary><strong>Configure ignores in <code>conftest.py</code></strong></summary>
+<summary><strong>Async timeouts and the autojump threshold</strong></summary>
 
-If you need project- or directory-specific ignore rules without touching `pyproject.toml`:
+`asyncio.sleep` always wakes instantly. Loop **timers** (`asyncio.wait_for`, `asyncio.timeout`, `loop.call_later`) fire once the event loop has been idle for `autojump_threshold` **real** seconds (default `0.02`). That short grace period lets real I/O, such as a local test server, answer before a timeout is forced.
 
 ```python
-# conftest.py
-pytest_sleepfake_ignore = ["my_project.telemetry", "my_project.metrics"]
+async def test_timeout(sleepfake):
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(2):
+            await asyncio.sleep(10)  # the clock stops at +2 s, like real asyncio
 ```
 
-This is used by:
-
-- the `sleepfake` fixture
-- `@pytest.mark.sleepfake`
-- global autouse mode (`sleepfake_autouse = true` or `--sleepfake`)
-
-</details>
-
-<details>
-<summary><strong><code>asyncio.timeout</code> integration</strong></summary>
-
-The frozen clock advances before each sleep future resolves, so `asyncio.timeout` still fires correctly:
+Tune it per instance or per project:
 
 ```python
-import asyncio
-import pytest
-from sleepfake import SleepFake
+SleepFake(autojump_threshold=0)  # jump as soon as the loop is idle
+SleepFake(autojump_threshold=math.inf)  # never jump: timers only fire when sleeps move the clock
+```
 
-
-async def test_timeout_fires():
-    with SleepFake():
-        with pytest.raises(TimeoutError):
-            async with asyncio.timeout(2):
-                await asyncio.sleep(10)  # clock jumps to +10 s → timeout at +2 s fires
+```toml
+[tool.pytest.ini_options]
+sleepfake_autojump_threshold = "0.5"
 ```
 
 </details>
 
-<details>
-<summary><strong>Options reference (API, CLI, config)</strong></summary>
+## 🛠️ Options reference
 
-| Where                                           | Option                      | Example                                               | Purpose                                                                                                                  |
-| ----------------------------------------------- | --------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Python API (`SleepFake`)                        | `ignore: list[str] \| None` | `SleepFake(ignore=["my.module"])`                     | Add module prefixes freezegun should ignore while freezing time.                                                         |
-| Pytest CLI                                      | `--sleepfake`               | `pytest --sleepfake`                                  | Enable SleepFake for every test in the session.                                                                          |
-| Pytest CLI                                      | `--sleepfake-ignore MODULE` | `pytest --sleepfake-ignore my.module`                 | Add a module prefix to ignore (repeatable; merged with `sleepfake_ignore`).                                              |
-| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_autouse = true`  | `[tool.pytest.ini_options]\nsleepfake_autouse = true` | Same as `--sleepfake`, but persisted in config.                                                                          |
-| Pytest config (`pytest.ini` / `pyproject.toml`) | `sleepfake_ignore`          | `sleepfake_ignore = ["my.module"]`                    | Add module prefixes to ignore for all pytest-managed SleepFake usage.                                                    |
-| `conftest.py`                                   | `pytest_sleepfake_ignore`   | `pytest_sleepfake_ignore = ["my.module"]`             | Override ignore prefixes for a test subtree (directory-scoped).                                                          |
-| Pytest marker                                   | `@pytest.mark.no_sleepfake` | `@pytest.mark.no_sleepfake`                           | Opt a single test out of global autouse patching. Has no effect if the test explicitly requests the `sleepfake` fixture. |
+| Where                         | Option                                | Purpose                                                                       |
+| ----------------------------- | ------------------------------------- | ----------------------------------------------------------------------------- |
+| `SleepFake(...)`              | `ignore: list[str]`                   | Module prefixes that stay on real clocks.                                     |
+| `SleepFake(...)`              | `autojump_threshold: float`           | Real idle seconds before loop timers fire (default `0.02`, `0`, `math.inf`). |
+| pytest config                 | `sleepfake_autouse = true`            | Apply SleepFake to every test.                                                |
+| pytest config                 | `sleepfake_ignore`                    | Module prefixes that stay on real clocks, for every test.                    |
+| pytest config                 | `sleepfake_autojump_threshold`        | Same as the constructor argument, for every test.                            |
+| pytest CLI                    | `--sleepfake`                         | Same as `sleepfake_autouse = true`.                                           |
+| pytest CLI                    | `--sleepfake-ignore MODULE`           | Add an ignored prefix (repeatable).                                           |
+| `conftest.py`                 | `pytest_sleepfake_ignore`             | Ignored prefixes for that directory subtree (a string or an iterable).       |
+| marker                        | `@pytest.mark.sleepfake`              | Apply SleepFake to one test, class or module.                                 |
+| marker                        | `@pytest.mark.no_sleepfake`           | Opt one test out of global autouse.                                           |
 
-Notes:
-
-- Every ignore list is merged with `DEFAULT_IGNORE = ["_pytest.timing"]`.
-  This keeps pytest duration measurement on real clocks and prevents epoch-scale `--durations` output.
-- User-provided ignore values are appended after `DEFAULT_IGNORE` and deduplicated.
-
-</details>
-
-## ⚠️ Scope limitation
-
-SleepFake patches `time.sleep` and `asyncio.sleep` at two levels:
-
-1. **The source module** (`time.sleep` / `asyncio.sleep`) — via `unittest.mock.patch`.
-2. **Module-level aliases in `sys.modules`** — any attribute that points to the original
-   `time.sleep` or `asyncio.sleep` at context entry is patched too. This covers the common
-   `from time import sleep` pattern at the top of a module.
-
-The one case that **cannot** be covered is a **local variable** binding created inside a
-function body before the context is entered:
-
-```python
-def hard_to_patch():
-    _sleep = time.sleep  # local variable — not visible in sys.modules
-    with SleepFake():
-        _sleep(10)  # ⚠️ calls the real time.sleep; cannot be intercepted
-```
+Every ignore list is merged with `DEFAULT_IGNORE = ["_pytest.timing", "pytest_timeout"]`, which keeps pytest's `--durations` and pytest-timeout on real clocks. Disable the plugin with `-p no:sleepfake`.
 
 ## 🧪 How it works
 
-| Aspect               | Detail                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Sync sleep**       | `frozen_factory.tick(delta)` advances frozen time immediately                                                                                                                  |
-| **Async sleep**      | `(deadline, seq, future)` goes into an `asyncio.PriorityQueue`; a background task resolves futures in deadline order                                                           |
-| **Broad patching**   | On context entry, `sys.modules` is scanned for module-level aliases of the originals (e.g. `from time import sleep`); all matched attributes are replaced and restored on exit |
-| **Timeout safety**   | After advancing time, the processor yields one event-loop turn so timeout callbacks can fire before futures resolve                                                            |
-| **Cancellation**     | Cancelled futures are skipped; the processor keeps running                                                                                                                     |
-| **pytest durations** | `freeze_time(..., ignore=["_pytest.timing", ...])` avoids breaking pytest internal wall-clock timing                                                                           |
+| Aspect               | Detail                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Clock**            | [freezegun](https://github.com/spulec/freezegun) freezes `time.time`, `time.monotonic`, `datetime.now`... and so the event loop's clock        |
+| **Sync sleep**       | `time.sleep(n)` ticks the frozen clock by `n` (thread-safe)                                                                                    |
+| **Async sleep**      | Once the event loop is idle, the clock jumps to the earliest pending deadline and that sleep wakes, so concurrent sleeps resolve in order     |
+| **Loop timers**      | `BaseEventLoop.call_at` is patched; after `autojump_threshold` real idle seconds the clock jumps to the next timer                             |
+| **Module aliases**   | `from time import sleep` / `from asyncio import sleep` bindings in `sys.modules` are swapped on entry and restored on exit                      |
+| **Nesting**          | Contexts nest; the innermost one drives the clock                                                                                              |
+
+## ⚠️ Limitations
+
+- **Local bindings.** A `sleep` captured in a local variable before the context starts (`_sleep = time.sleep`) keeps calling the real function.
+- **Real I/O under a timeout.** If real I/O takes longer than `autojump_threshold` inside a `wait_for`/`timeout`, the timeout fires on the fake clock. Raise the threshold, or set it to `math.inf`.
+- **Other event loops.** Timer autojump reads asyncio's pure-Python loop internals. On other loops (e.g. uvloop) `asyncio.sleep` is still faked, but loop timers need real time.
+- **Timer precision.** A timer jump lands 1 µs after the deadline: asyncio only runs a timer once the clock is strictly past it.
+- **Shared clock.** The frozen clock is global: every thread and every event loop sees the same time.
+
+## 🆚 Alternatives
+
+| Tool                                                            | Fakes `time.sleep` | Fakes `asyncio.sleep` / loop timers | Freezes `datetime` / `time.time` |
+| --------------------------------------------------------------- | ------------------ | ----------------------------------- | -------------------------------- |
+| **SleepFake**                                                   | ✅                 | ✅                                  | ✅ (via freezegun)               |
+| [freezegun](https://github.com/spulec/freezegun)                | ❌ (really sleeps) | ❌                                  | ✅                               |
+| [time-machine](https://github.com/adamchainz/time-machine)      | ❌                 | ❌                                  | ✅                               |
+| [looptime](https://github.com/nolar/looptime)                   | ❌                 | ✅ (asyncio loop time)              | ❌                               |
 
 ## 🤝 Contributing
 
-PRs and issues welcome! Here's how to get started:
-
 ```bash
-# Install dependencies and run the test suite
-uv run pytest
-
-# Lint (ruff + ty) then test
-make test-all
-
-# Run against all supported Python versions (3.10–3.15)
-make test-all-python
+make dev-install   # uv sync + prek git hooks
+make test-all      # ruff + ty, then tests
+make cov           # tests under coverage (100% required)
+make test-all-python  # 3.10 to 3.15 and 3.14t
 ```
 
-Please run `make test-all` before submitting a PR.
-
-> **Note:** SleepFake uses [freezegun](https://github.com/spulec/freezegun) under the hood.
+PRs and issues welcome. See [CHANGELOG.md](CHANGELOG.md) for release notes.
