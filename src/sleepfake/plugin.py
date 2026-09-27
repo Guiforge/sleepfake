@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from sleepfake import SleepFake
+from sleepfake import DEFAULT_AUTOJUMP_THRESHOLD, SleepFake
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
@@ -54,7 +54,7 @@ def sleepfake(request: pytest.FixtureRequest) -> Generator[SleepFake, None, None
         ...     sleepfake.mock_sleep(120)
         ...     assert (datetime.datetime.now() - t0).total_seconds() == 120.0
     """
-    with SleepFake(ignore=_resolve_ignore(request.config, request.path)) as sf:
+    with _new_sleepfake(request) as sf:
         yield sf
 
 
@@ -78,7 +78,7 @@ async def asleepfake(request: pytest.FixtureRequest) -> AsyncGenerator[SleepFake
         DeprecationWarning,
         stacklevel=2,
     )
-    async with SleepFake(ignore=_resolve_ignore(request.config, request.path)) as sf:
+    async with _new_sleepfake(request) as sf:
         yield sf
 
 
@@ -101,6 +101,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Apply SleepFake automatically to every test in the session.",
         type="bool",
         default=False,
+    )
+    parser.addini(
+        "sleepfake_autojump_threshold",
+        help=(
+            "Real seconds an idle event loop waits before the fake clock jumps to its next "
+            f"timer (wait_for, asyncio.timeout, call_later). Default {DEFAULT_AUTOJUMP_THRESHOLD}; "
+            "0 jumps at once; inf never jumps."
+        ),
+        type="string",
+        default=str(DEFAULT_AUTOJUMP_THRESHOLD),
     )
     parser.addini(
         "sleepfake_ignore",
@@ -169,6 +179,21 @@ def _conftest_ignore(config: pytest.Config, path: pathlib.Path) -> list[str]:
 def _resolve_ignore(config: pytest.Config, path: pathlib.Path) -> list[str]:
     configured = [*_configured_ignore(config), *_conftest_ignore(config, path)]
     return list(dict.fromkeys(configured))
+
+
+def _new_sleepfake(request: pytest.FixtureRequest) -> SleepFake:
+    raw = request.config.getini("sleepfake_autojump_threshold")
+    try:
+        threshold = float(raw)
+    except ValueError:
+        msg = f"sleepfake_autojump_threshold must be a number, got {raw!r}"
+        raise pytest.UsageError(msg) from None
+    try:
+        return SleepFake(
+            ignore=_resolve_ignore(request.config, request.path), autojump_threshold=threshold
+        )
+    except ValueError as exc:
+        raise pytest.UsageError(str(exc)) from None
 
 
 def _autouse_enabled(config: pytest.Config) -> bool:

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from sleepfake.core import DEFAULT_IGNORE, SleepFake
+from sleepfake.core import DEFAULT_AUTOJUMP_THRESHOLD, DEFAULT_IGNORE, SleepFake
 
-__all__ = ["DEFAULT_IGNORE", "SleepFake"]
+__all__ = ["DEFAULT_AUTOJUMP_THRESHOLD", "DEFAULT_IGNORE", "SleepFake"]
