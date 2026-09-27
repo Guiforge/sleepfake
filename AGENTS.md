@@ -16,9 +16,9 @@ Key files:
 
 ```sh
 # Install deps + run tests
-uv run pytest --force-sugar -vvv
+uv run pytest
 
-# Lint (ruff + mypy) then test
+# Lint (ruff + ty) then test
 make test-all
 
 # Run against all supported Python versions (3.10–3.15)
@@ -27,8 +27,10 @@ make test-all-python
 
 ## Code Style
 
-- **Formatter/linter**: ruff (`target-version = "py310"`, line length 100). Run `uv run ruff check --fix . && uv run ruff format .`
-- **Type checker**: mypy in strict mode (`disallow_untyped_calls`, `disallow_any_generics`, etc.)
+- **Formatter/linter**: ruff with `select = ["ALL"]` (`target-version = "py310"`, line length 100). Run `make lint`
+- **Type checker**: ty with every rule set to `error` (`[tool.ty.rules] all = "error"`)
+- **Git hooks**: prek (`prek.toml`), installed by `make dev-install`; run all with `make hooks`
+- **pytest**: `--strict-markers --strict-config`, `filterwarnings = ["error"]`, `xfail_strict = true`
 - **Docstrings**: Google style (`pydocstyle.convention = "google"`); public methods only
 - Python 3.10 minimum — use `from __future__ import annotations` and `typing_extensions` for backcompat
 

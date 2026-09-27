@@ -42,8 +42,8 @@ def test_sync_multiple_sleeps_accumulate():
         t1 = time.time()
         time.sleep(3)
         t2 = time.time()
-        assert t1 - t0 >= 2  # noqa: PLR2004
-        assert t2 - t0 >= 5  # noqa: PLR2004
+        assert t1 - t0 >= 2
+        assert t2 - t0 >= 5
 
 
 def test_sync_freeze_not_started_before_enter():
@@ -106,7 +106,7 @@ def test_durations_not_epoch_scale(pytester: pytest.Pytester) -> None:
     for line in result.outlines:
         m = re.match(r"^\s*([\d.]+)s\b", line)
         if m:
-            assert float(m.group(1)) < 60.0, f"Epoch-scale duration detected: {line!r}"  # noqa: PLR2004
+            assert float(m.group(1)) < 60.0, f"Epoch-scale duration detected: {line!r}"
 
 
 def test_default_ignore_includes_pytest() -> None:
@@ -345,8 +345,8 @@ def test_fixture_sync_multiple_sleeps(sleepfake: SleepFake) -> None:  # noqa: AR
     t1 = time.time()
     time.sleep(3)
     t2 = time.time()
-    assert t1 - t0 >= 2  # noqa: PLR2004
-    assert t2 - t0 >= 5  # noqa: PLR2004
+    assert t1 - t0 >= 2
+    assert t2 - t0 >= 5
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +619,7 @@ def test_broad_patch_time_sleep_module_alias() -> None:
     """SleepFake patches module-level ``from time import sleep`` aliases in sys.modules."""
     original_sleep = time.sleep  # capture before any context is active
     fake_mod = types.ModuleType("_sleepfake_test_broad_sync")
-    fake_mod.sleep = original_sleep  # type: ignore[attr-defined]  # simulates ``from time import sleep``
+    fake_mod.__dict__["sleep"] = original_sleep  # simulates ``from time import sleep``
     sys.modules["_sleepfake_test_broad_sync"] = fake_mod
     try:
         with SleepFake():
@@ -627,7 +627,7 @@ def test_broad_patch_time_sleep_module_alias() -> None:
             assert fake_mod.sleep is not original_sleep  # type: ignore[attr-defined]
             t0 = time.time()
             fake_mod.sleep(10)  # type: ignore[attr-defined]
-            assert time.time() - t0 >= 10  # noqa: PLR2004
+            assert time.time() - t0 >= 10
         # After exit the alias is restored.
         assert fake_mod.sleep is original_sleep  # type: ignore[attr-defined]
     finally:
@@ -637,7 +637,7 @@ def test_broad_patch_time_sleep_module_alias() -> None:
 def test_broad_patch_restores_alias_on_exception() -> None:
     """Module-level aliases are restored even when the context body raises."""
     fake_mod = types.ModuleType("_sleepfake_test_broad_exc")
-    fake_mod.sleep = time.sleep  # type: ignore[attr-defined]
+    fake_mod.__dict__["sleep"] = time.sleep
     sys.modules["_sleepfake_test_broad_exc"] = fake_mod
     try:
         with pytest.raises(RuntimeError), SleepFake():

@@ -37,6 +37,7 @@ Now regular tests automatically skip sleeps:
 ```python
 import time
 
+
 def test_retry():
     start = time.time()
     time.sleep(30)  # returns instantly
@@ -47,6 +48,7 @@ Async works the same way:
 
 ```python
 import asyncio
+
 
 async def test_polling():
     start = asyncio.get_running_loop().time()
@@ -80,14 +82,15 @@ from sleepfake import SleepFake
 # Sync
 with SleepFake():
     start = time.time()
-    time.sleep(10)           # returns instantly
+    time.sleep(10)  # returns instantly
     assert time.time() - start >= 10
+
 
 # Async — use async with for proper cleanup of the background processor
 async def test_async():
     async with SleepFake():
         start = asyncio.get_running_loop().time()
-        await asyncio.sleep(5)   # returns instantly
+        await asyncio.sleep(5)  # returns instantly
         assert asyncio.get_running_loop().time() - start >= 5
 ```
 
@@ -112,14 +115,16 @@ Install once; the `sleepfake` fixture is available automatically in tests.
 ```python
 import time
 
+
 def test_retry_logic(sleepfake):
     start = time.time()
-    time.sleep(30)           # instantly skipped
+    time.sleep(30)  # instantly skipped
     assert time.time() - start >= 30
 ```
 
 ```python
 import asyncio
+
 
 async def test_polling(sleepfake):
     start = asyncio.get_running_loop().time()
@@ -144,11 +149,13 @@ import time
 import asyncio
 import pytest
 
+
 @pytest.mark.sleepfake
 def test_marked_sync():
     start = time.time()
     time.sleep(100)
     assert time.time() - start >= 100
+
 
 @pytest.mark.sleepfake
 async def test_marked_async():
@@ -195,11 +202,13 @@ pytest --sleepfake --sleepfake-ignore my_project.telemetry --sleepfake-ignore my
 import time
 import pytest
 
+
 # This test runs with SleepFake (autouse applies).
 def test_patched():
     start = time.time()
     time.sleep(100)
     assert time.time() - start >= 100
+
 
 # This test uses real time — SleepFake is NOT applied.
 @pytest.mark.no_sleepfake
@@ -218,9 +227,11 @@ If your test explicitly requests `sleepfake`, it still patches.
 # conftest.py
 import pytest
 
+
 @pytest.fixture(autouse=True)
 def _sleepfake_sync(sleepfake):
     """Auto-apply SleepFake for every test (sync and async)."""
+
 
 @pytest.fixture(autouse=True)
 async def _sleepfake_async(sleepfake):
@@ -259,11 +270,12 @@ import asyncio
 import pytest
 from sleepfake import SleepFake
 
+
 async def test_timeout_fires():
     with SleepFake():
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(2):
-                await asyncio.sleep(10)   # clock jumps to +10 s → timeout at +2 s fires
+                await asyncio.sleep(10)  # clock jumps to +10 s → timeout at +2 s fires
 ```
 
 </details>
@@ -303,9 +315,9 @@ function body before the context is entered:
 
 ```python
 def hard_to_patch():
-    _sleep = time.sleep   # local variable — not visible in sys.modules
+    _sleep = time.sleep  # local variable — not visible in sys.modules
     with SleepFake():
-        _sleep(10)        # ⚠️ calls the real time.sleep; cannot be intercepted
+        _sleep(10)  # ⚠️ calls the real time.sleep; cannot be intercepted
 ```
 
 ## 🧪 How it works
@@ -325,9 +337,9 @@ PRs and issues welcome! Here's how to get started:
 
 ```bash
 # Install dependencies and run the test suite
-uv run pytest --force-sugar -vvv
+uv run pytest
 
-# Lint (ruff + mypy) then test
+# Lint (ruff + ty) then test
 make test-all
 
 # Run against all supported Python versions (3.10–3.15)

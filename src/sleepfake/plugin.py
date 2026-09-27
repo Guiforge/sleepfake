@@ -1,3 +1,5 @@
+"""Pytest plugin: ``sleepfake`` fixture, markers and autouse options."""
+
 from __future__ import annotations
 
 import pathlib

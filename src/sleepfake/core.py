@@ -1,3 +1,5 @@
+"""The :class:`SleepFake` context manager."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +9,7 @@ import sys
 import time as _time_module
 import types
 import warnings
-from typing import Final
+from typing import Final, cast
 from unittest.mock import patch
 
 import freezegun
@@ -124,7 +126,8 @@ class SleepFake:
         ignore = tuple(self._ignore)
 
         for mod_name, mod in list(sys.modules.items()):
-            if not isinstance(mod, types.ModuleType):
+            # sys.modules is typed as ModuleType-only, but may hold other objects at runtime.
+            if not isinstance(mod, types.ModuleType):  # ty: ignore[redundant-condition-strict]
                 continue
             if mod is _time_module or mod is asyncio or mod is _self:
                 continue
@@ -158,7 +161,10 @@ class SleepFake:
 
     def _start_freeze(self) -> None:
         if not self._freeze_started:
-            self.frozen_factory = self.freeze_time.start()
+            # Without tick/auto_tick_seconds, freeze_time always yields a FrozenDateTimeFactory.
+            self.frozen_factory = cast(
+                "freezegun.api.FrozenDateTimeFactory", self.freeze_time.start()
+            )
             self._freeze_started = True
 
     def _stop_freeze(self) -> None:
@@ -293,9 +299,11 @@ class SleepFake:
             60.0
         """
         if seconds < 0:
-            raise ValueError("sleep length must be non-negative")
+            msg = "sleep length must be non-negative"
+            raise ValueError(msg)
         if self.frozen_factory is None:
-            raise RuntimeError("mock_sleep called outside SleepFake context")
+            msg = "mock_sleep called outside SleepFake context"
+            raise RuntimeError(msg)
         self.frozen_factory.tick(delta=datetime.timedelta(seconds=seconds))
 
     async def amock_sleep(self, seconds: float) -> None:
@@ -338,7 +346,8 @@ class SleepFake:
             [1, 2, 3]
         """
         if seconds < 0:
-            raise ValueError("sleep length must be non-negative")
+            msg = "sleep length must be non-negative"
+            raise ValueError(msg)
         # lazy initialize the sleep queue and processor (useful for async tests fixture)
         if self.sleep_processor is None:
             await self._init_async_patch()

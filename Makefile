@@ -1,4 +1,4 @@
-.PHONY: help lint test test-all test-all-python pre-commit coverage dist \
+.PHONY: help lint lint-ci test test-all test-all-python hooks coverage dist \
         check-uv prod-install dev-install upgrade-dep \
         clean clean-build clean-pyc clean-test
 .DEFAULT_GOAL := help
@@ -54,33 +54,36 @@ help: ## show this help message
 # ---------------------------------------------------------------------------
 # Quality
 # ---------------------------------------------------------------------------
-lint: ## run ruff (check + format) and mypy
+lint: ## run ruff (fix + format) and ty
 	$(UV) ruff check --fix .
 	$(UV) ruff format .
-	$(UV) mypy --version
-	$(UV) mypy --python-version '3.10' --pretty --config-file pyproject.toml src
+	$(UV) ty check
 	@echo "${GREEN}✅ Lint checks passed!${NOCOLOR}"
+
+lint-ci: ## run ruff and ty without modifying files (fails on any issue)
+	$(UV) ruff check --no-fix .
+	$(UV) ruff format --check .
+	$(UV) ty check
 
 test: ## run tests quickly with the default Python
 	@echo "${BLUE}🧪 Running tests...${NOCOLOR}"
-	$(UV) pytest --force-sugar -vvv
+	$(UV) pytest
 
 test-all: lint test ## run lint then tests
 
 test-all-python: ## run tests against all supported Python versions
 	@for version in $(PYTHON_VERSIONS); do \
 		echo "${GREEN}🧪 Testing Python $$version...${NOCOLOR}"; \
-		uv run --python $$version pytest --force-sugar -vvv || exit 1; \
+		uv run --python $$version pytest || exit 1; \
 	done
 	@echo "${GREEN}✅ All Python versions passed!${NOCOLOR}"
 
-pre-commit: ## run pre-commit hooks on all files
-	@echo "${GREEN}🔨 Running pre-commit hooks...${NOCOLOR}"
-	$(UV) pre-commit run --all-files
+hooks: ## run prek hooks on all files
+	$(UV) prek run --all-files
 
 coverage: ## check code coverage quickly with the default Python
-	$(UV) coverage run --source src -m pytest -vvv
-	$(UV) coverage report -m
+	$(UV) coverage run -m pytest
+	$(UV) coverage report
 	$(UV) coverage html
 	$(BROWSER) htmlcov/index.html
 
@@ -99,15 +102,15 @@ check-uv: ## verify uv is installed
 prod-install: check-uv ## install production dependencies only
 	uv sync --no-dev
 
-dev-install: check-uv ## install all dependencies and pre-commit hooks
+dev-install: check-uv ## install all dependencies and prek hooks
 	uv sync --dev
-	$(UV) pre-commit install
+	$(UV) prek install
 	@echo "🧊🚀  ${GREEN}Have a good day of coding ${NOCOLOR}  🚀🧊"
 
-upgrade-dep: check-uv ## upgrade all dependencies and pre-commit hooks
+upgrade-dep: check-uv ## upgrade all dependencies and prek hooks
 	@echo "${GREEN}🔄 Upgrading dependencies...${NOCOLOR}"
 	uv sync -U
-	$(UV) pre-commit autoupdate
+	$(UV) prek update
 	@echo "${GREEN}✅ Dependencies upgraded!${NOCOLOR}"
 
 # ---------------------------------------------------------------------------

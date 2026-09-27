@@ -105,7 +105,7 @@ async def test_async_gather_mixed_durations_time_advances_correctly():
         )
         end = asyncio.get_running_loop().time()
     # longest is 3 seconds; real wall-clock must be < 1 s
-    assert end - start >= 3  # noqa: PLR2004
+    assert end - start >= 3
 
 
 # ---------------------------------------------------------------------------
@@ -249,8 +249,8 @@ async def test_async_sequential_sleeps_accumulate():
         mid = asyncio.get_running_loop().time()
         await asyncio.sleep(3)
         end = asyncio.get_running_loop().time()
-        assert mid - start >= 2  # noqa: PLR2004
-        assert end - start >= 5  # noqa: PLR2004
+        assert mid - start >= 2
+        assert end - start >= 5
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +433,7 @@ async def test_broad_patch_asyncio_sleep_module_alias() -> None:
     """SleepFake patches module-level ``from asyncio import sleep`` aliases in sys.modules."""
     original_sleep = asyncio.sleep  # capture before any context is active
     fake_mod = types.ModuleType("_sleepfake_test_broad_async")
-    fake_mod.sleep = original_sleep  # type: ignore[attr-defined]  # simulates ``from asyncio import sleep``
+    fake_mod.__dict__["sleep"] = original_sleep  # simulates ``from asyncio import sleep``
     sys.modules["_sleepfake_test_broad_async"] = fake_mod
     try:
         with SleepFake():
@@ -441,7 +441,7 @@ async def test_broad_patch_asyncio_sleep_module_alias() -> None:
             assert fake_mod.sleep is not original_sleep  # type: ignore[attr-defined]
             start = asyncio.get_running_loop().time()
             await fake_mod.sleep(5)  # type: ignore[attr-defined]
-            assert asyncio.get_running_loop().time() - start >= 5  # noqa: PLR2004
+            assert asyncio.get_running_loop().time() - start >= 5
         # After exit the alias is restored.
         assert fake_mod.sleep is original_sleep  # type: ignore[attr-defined]
     finally:
