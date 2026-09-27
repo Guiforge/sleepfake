@@ -9,15 +9,16 @@ import sys
 import time as _time_module
 import types
 import warnings
-from typing import Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, TypeVar, cast
 from unittest.mock import patch
 
 import freezegun
 
-if sys.version_info >= (3, 11):
-    from typing import Self
-else:  # pragma: no cover
-    from typing_extensions import Self
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 11):
+        from typing import Self
+    else:
+        from typing_extensions import Self
 
 __all__ = ["DEFAULT_IGNORE", "SleepFake"]
 

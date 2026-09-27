@@ -593,6 +593,7 @@ def test_exit_after_event_loop_closed(caplog: pytest.LogCaptureFixture) -> None:
         loop.run_until_complete(asyncio.sleep(1))
         loop.close()
     assert not any(task.done() for task in pending)
+    del pending, loop
     with caplog.at_level(logging.CRITICAL, logger="asyncio"):
         gc.collect()  # collect the orphaned processor here, not during a later test
 
